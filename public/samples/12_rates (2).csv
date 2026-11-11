@@ -1,0 +1,13 @@
+from,to,cost
+Leeds,Hull,121
+Leeds,Sheffield,109
+Leeds,Nottingham,149
+Leeds,Birmingham,184
+Leeds,Newcastle,171
+Leeds,London,259
+York,Leeds,84
+Bradford,Liverpool,141
+Wakefield,Manchester,137
+Halifax,Leeds,72
+Leeds,Preston,126
+Leeds,Lincoln,138
