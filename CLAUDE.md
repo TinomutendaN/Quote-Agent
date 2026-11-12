@@ -59,6 +59,7 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - **Routes** are one text field, `Origin → Destination`. Matching different spellings of the same route (e.g. "Leeds - Bristol") is the job of `compare_history`.
 - **Extra columns** beyond the original plan: `source_files.sender_name`, `suppliers.initials`, `review_items.resolved_at`, `quote_lines.time_slot` (`weekday`/`evening`/`overnight`/`weekend`) and `quote_lines.goods` (`general`/`chilled_medical`/`fragile`/`secure`). Two lines are the same job (a possible duplicate) only when supplier, route, category, time slot and goods all match and they come from different files.
 - **Rule precedence:** Specialist (rule 2) wins over Out-of-hours (rule 1), e.g. chilled goods on a Saturday are Specialist.
+- **Run state table:** `demo_run` holds exactly one row (`idle` / `running` / `finished`, plus `run_id`, `started_at`, `last_activity_at`, `finished_at`). Seeded as `idle`; reset puts it back to `idle`.
 
 **Pricing**
 - **Price list rule:** for each route and service, use the cheapest approved quote (excluding past prices).
@@ -67,6 +68,8 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 
 **Demo behaviour**
 - **Process inbox runs once per reset.** If the sample inbox has already been processed, the button shows the saved results instead of running again.
+- **Files run in parallel, one queue per supplier.** `lib/agent/queues.ts` (shared by the browser and `npm run agent:test`) splits the inbox into one queue per supplier plus one for the unknown-sender file. Files in a queue run in received order (so Swift Haul's 03 finishes before 04 and the duplicate is caught); queues run side by side, at most 6 files at once. The held-back file 16 is in no queue. A failed file stops its own queue so a later quote never overtakes it. The server enforces the same order: `/api/agent` refuses a supplier's file while an earlier-received file from that supplier is still waiting or working. Build the queues from a file list read *after* `POST /api/run`, because taking over a stalled run puts stuck files back to waiting.
+- **Only one run at a time.** `POST /api/run` starts the run with one atomic `UPDATE … WHERE status = 'idle'`; exactly one caller gets a `run_id`, everyone else gets the current state. `/api/agent` only accepts inbox files from the `run_id` owner (file 16 also after the run has finished) and claims each file atomically (`waiting` → `working`), so no file is processed twice; anything else gets a 409 with a plain message. The run becomes `finished` when every inbox file is done or needs review. A run with no activity for 10 minutes is stalled: the next start takes it over, files stuck as `working` go back to `waiting` with their partial lines and review items cleared, and only waiting files are sent again.
 - **New quote moment is automatic.** When the last inbox file finishes, the agent processes the held-back M6 Express email (file 16) once.
 - **Reset demo** lives in the sidebar footer. All visitors share one database; reset restores the fresh sample data by re-running `db/schema.sql` and `db/seed.sql`.
 - **Rules are read-only** in the demo.

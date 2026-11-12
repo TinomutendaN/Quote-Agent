@@ -405,6 +405,140 @@ export async function insertAgentEvent(event: {
   `;
 }
 
+export type ClaimResult = "claimed" | "not_waiting" | "earlier_file_pending";
+
+/**
+ * Claims a file for processing: waiting → working in one statement, so no
+ * file is ever processed twice. An inbox file is also refused while an
+ * earlier-received inbox file from the same supplier is still waiting or
+ * working, so a supplier's later quote never overtakes an earlier one (and
+ * check_duplicates always sees the earlier price).
+ */
+export async function claimSourceFile(id: number): Promise<ClaimResult> {
+  const rows = await db()`
+    UPDATE source_files f SET status = 'working'
+    WHERE f.id = ${id} AND f.status = 'waiting'
+      AND (f.is_upload OR f.supplier_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM source_files e
+        WHERE e.supplier_id = f.supplier_id AND e.id <> f.id
+          AND NOT e.is_upload AND NOT e.is_held_back
+          AND e.status IN ('waiting', 'working')
+          AND (e.received_at, e.id) < (f.received_at, f.id)))
+    RETURNING f.id
+  `;
+  if (rows.length > 0) return "claimed";
+  const [file] = await db()`SELECT status FROM source_files WHERE id = ${id}`;
+  return file?.status === "waiting" ? "earlier_file_pending" : "not_waiting";
+}
+
+// ---------------------------------------------------------------------------
+// Shared demo run (one row in demo_run). Only one Process inbox run at a time.
+// ---------------------------------------------------------------------------
+
+export type DemoRunStatus = "idle" | "running" | "finished";
+
+export type DemoRun = {
+  status: DemoRunStatus;
+  started_at: string | null;
+  last_activity_at: string | null;
+  finished_at: string | null;
+  /** Inbox files (not held back, not uploads) by status. */
+  files: { waiting: number; working: number; done: number; needs_review: number };
+};
+
+export async function getDemoRun(): Promise<DemoRun> {
+  const rows = await db()`
+    SELECT r.status, r.started_at::text AS started_at,
+           r.last_activity_at::text AS last_activity_at, r.finished_at::text AS finished_at,
+           (SELECT json_build_object(
+              'waiting',      count(*) FILTER (WHERE status = 'waiting'),
+              'working',      count(*) FILTER (WHERE status = 'working'),
+              'done',         count(*) FILTER (WHERE status = 'done'),
+              'needs_review', count(*) FILTER (WHERE status = 'needs_review'))
+            FROM source_files WHERE NOT is_held_back AND NOT is_upload) AS files
+    FROM demo_run r WHERE r.id = 1
+  `;
+  return rows[0] as DemoRun;
+}
+
+/**
+ * Starts the run in one statement: idle → running, or takes over a running
+ * run with no activity for `stallMinutes`. Returns the previous status when
+ * this call won, or null when a run is already going (or finished).
+ */
+export async function claimDemoRun(
+  runId: string,
+  stallMinutes: number,
+): Promise<{ previous: "idle" | "running" } | null> {
+  const rows = await db()`
+    WITH prev AS (SELECT status FROM demo_run WHERE id = 1 FOR UPDATE)
+    UPDATE demo_run r
+    SET status = 'running',
+        run_id = ${runId}::uuid,
+        started_at = CASE WHEN prev.status = 'idle' THEN now() ELSE r.started_at END,
+        last_activity_at = now(),
+        finished_at = NULL
+    FROM prev
+    WHERE r.id = 1
+      AND (prev.status = 'idle'
+           OR (prev.status = 'running'
+               AND r.last_activity_at < now() - make_interval(mins => ${stallMinutes}::int)))
+    RETURNING prev.status AS previous
+  `;
+  return (rows[0] as { previous: "idle" | "running" } | undefined) ?? null;
+}
+
+/**
+ * After a stalled run is taken over: files left as working go back to
+ * waiting and their partial lines and review items are removed (events kept).
+ * Returns the ids reset.
+ */
+export async function resetStuckFiles(): Promise<number[]> {
+  const results = await db().transaction((sql) => [
+    sql`DELETE FROM review_items
+        WHERE source_file_id IN (SELECT id FROM source_files WHERE status = 'working' AND NOT is_upload)
+           OR quote_line_id IN (SELECT q.id FROM quote_lines q JOIN source_files f ON f.id = q.source_file_id
+                                WHERE f.status = 'working' AND NOT f.is_upload)`,
+    sql`DELETE FROM quote_lines
+        WHERE NOT is_history
+          AND source_file_id IN (SELECT id FROM source_files WHERE status = 'working' AND NOT is_upload)`,
+    sql`UPDATE source_files SET status = 'waiting'
+        WHERE status = 'working' AND NOT is_upload
+        RETURNING id`,
+  ]);
+  return (results[2] as { id: number }[]).map((r) => r.id);
+}
+
+/** The run's status if `runId` owns it, else null. */
+export async function demoRunStatusFor(runId: string): Promise<DemoRunStatus | null> {
+  if (!/^[0-9a-f-]{36}$/i.test(runId)) return null;
+  const rows = await db()`
+    SELECT status FROM demo_run WHERE id = 1 AND run_id = ${runId}::uuid
+  `;
+  return (rows[0]?.status as DemoRunStatus | undefined) ?? null;
+}
+
+/** Marks the owner's run as active now (keeps it from counting as stalled). */
+export async function touchDemoRun(runId: string): Promise<void> {
+  await db()`
+    UPDATE demo_run SET last_activity_at = now()
+    WHERE id = 1 AND run_id = ${runId}::uuid AND status = 'running'
+  `;
+}
+
+/** running → finished once every inbox file is done or needs review. */
+export async function finishDemoRunIfComplete(): Promise<boolean> {
+  const rows = await db()`
+    UPDATE demo_run SET status = 'finished', finished_at = now(), last_activity_at = now()
+    WHERE id = 1 AND status = 'running'
+      AND NOT EXISTS (
+        SELECT 1 FROM source_files
+        WHERE NOT is_held_back AND NOT is_upload AND status IN ('waiting', 'working'))
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
 /** Lines saved and open review items for one file. */
 export async function countFileResults(
   fileId: number,

@@ -126,3 +126,8 @@ FROM (VALUES
   (2, 'Swift Haul update', DATE '2026-10-31', TIMESTAMPTZ '2026-10-23 09:00 Europe/London')
 ) AS p(version, label, cutoff, created_at)
 CROSS JOIN (SELECT '{"standard":25,"out_of_hours":35,"specialist":40}'::jsonb AS markup) m;
+
+-- ---------------------------------------------------------------------------
+-- Shared demo run state: idle until someone presses Process inbox.
+-- ---------------------------------------------------------------------------
+INSERT INTO demo_run (id, status) VALUES (1, 'idle');

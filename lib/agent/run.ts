@@ -43,9 +43,10 @@ async function loadSampleBytes(file: SourceFile): Promise<Uint8Array> {
 }
 
 /**
- * Processes one file and reports progress through `emit`. Never throws:
- * failures become an "error" event and the file goes back to "waiting".
- * `bytes` lets uploads (Step 6) pass content that isn't stored on disk.
+ * Processes one file and reports progress through `emit`. The caller must
+ * already have claimed the file (claimSourceFile: waiting → working). Never
+ * throws: failures become an "error" event and the file goes back to
+ * "waiting". `bytes` lets uploads (Step 6) pass content that isn't on disk.
  */
 export async function runAgent(
   fileId: number,
@@ -59,8 +60,8 @@ export async function runAgent(
     file = await getSourceFile(fileId);
     if (!file) throw new AgentError("That file couldn't be found.", `No source_files row ${fileId}`);
 
+    // Leftovers from an earlier failed attempt, if any.
     await clearFileResults(file.id);
-    await setSourceFileStatus(file.id, "working");
     emit({ type: "start", file_id: file.id, file_name: file.file_name, at: new Date().toISOString() });
 
     const log = new StepLog(file, emit);

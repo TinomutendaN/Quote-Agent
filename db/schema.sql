@@ -2,6 +2,7 @@
 -- Safe to re-run: drops every table (children first) and recreates it.
 -- Used by `npm run db:setup` and, later, by Reset demo.
 
+DROP TABLE IF EXISTS demo_run CASCADE;
 DROP TABLE IF EXISTS agent_events CASCADE;
 DROP TABLE IF EXISTS review_items CASCADE;
 DROP TABLE IF EXISTS quote_lines CASCADE;
@@ -123,4 +124,18 @@ CREATE TABLE price_lists (
   markup      jsonb NOT NULL,             -- {"standard":25,"out_of_hours":35,"specialist":40}
   rows        jsonb NOT NULL,             -- [{route, category, supplier, cost, markup_pct, sell, margin}]
   created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- The one shared "Process inbox" run (all visitors share one database).
+-- Exactly one row. idle → running (one visitor claims it atomically) →
+-- finished when every inbox file is done or needs review. A running run with
+-- no activity for 10 minutes counts as stalled and the next start takes it over.
+CREATE TABLE demo_run (
+  id                integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  status            text NOT NULL DEFAULT 'idle'
+                    CHECK (status IN ('idle', 'running', 'finished')),
+  run_id            uuid,                 -- secret token held by the browser that owns the run
+  started_at        timestamptz,
+  last_activity_at  timestamptz,
+  finished_at       timestamptz
 );

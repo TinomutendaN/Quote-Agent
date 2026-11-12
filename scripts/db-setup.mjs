@@ -44,6 +44,7 @@ try {
     UNION ALL SELECT 'review_items', count(*)::int FROM review_items
     UNION ALL SELECT 'agent_events', count(*)::int FROM agent_events
     UNION ALL SELECT 'price_lists', count(*)::int FROM price_lists
+    UNION ALL SELECT 'demo_run (' || status || ')', 1 FROM demo_run
   `);
   console.table(rows);
   console.log("Database ready.");
