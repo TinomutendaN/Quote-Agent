@@ -45,6 +45,10 @@ export type SourceFile = {
   file_path: string;
   type: SourceFileType;
   received_at: string;
+  /** UK time, e.g. "08:12". */
+  received_time: string;
+  /** UK date, e.g. "Wed 11 Nov". */
+  received_day: string;
   is_held_back: boolean;
   is_upload: boolean;
   status: SourceFileStatus;
@@ -95,11 +99,42 @@ export async function listSourceFiles(): Promise<SourceFile[]> {
   return (await db()`
     SELECT f.id, f.supplier_id, s.name AS supplier_name, f.sender_name,
            f.file_name, f.file_path, f.type, f.received_at::text AS received_at,
+           to_char(f.received_at AT TIME ZONE 'Europe/London', 'HH24:MI') AS received_time,
+           to_char(f.received_at AT TIME ZONE 'Europe/London', 'Dy FMDD Mon') AS received_day,
            f.is_held_back, f.is_upload, f.status
     FROM source_files f
     LEFT JOIN suppliers s ON s.id = f.supplier_id
     ORDER BY f.received_at, f.id
   `) as SourceFile[];
+}
+
+export type HistoryLine = {
+  id: number;
+  supplier_id: number;
+  route: string;
+  category: Category;
+  price: string; // numeric comes back as text, e.g. "158.00"
+  /** e.g. "2 Oct 2026" */
+  quote_day: string;
+};
+
+/** Seeded past prices (is_history = true) for every supplier, by route and date. */
+export async function listHistoryLines(): Promise<HistoryLine[]> {
+  return (await db()`
+    SELECT id, supplier_id, route, category, price::text AS price,
+           to_char(quote_date, 'FMDD Mon YYYY') AS quote_day
+    FROM quote_lines
+    WHERE is_history AND supplier_id IS NOT NULL
+    ORDER BY route, category, quote_date, id
+  `) as HistoryLine[];
+}
+
+/** Review items still waiting for a person (for the sidebar badge). */
+export async function countOpenReviewItems(): Promise<number> {
+  const rows = await db()`
+    SELECT count(*)::int AS count FROM review_items WHERE status = 'open'
+  `;
+  return rows[0].count as number;
 }
 
 /** Number of seeded past-price lines (is_history = true). */

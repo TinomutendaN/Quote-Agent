@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quote Agent – Ask</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#FFFFFF}
+a{color:#1D4ED8}a:hover{color:#1E3A8A}
+</style>
+</helmet>
+<div style="min-height: 1100px; display: flex; flex-wrap: wrap; background: #FAFBFC; color: #1B2440; font-family: Inter, system-ui, sans-serif">
+<nav aria-label="Main" style="flex: 1 1 230px; max-width: 100%; box-sizing: border-box; background: #FFFFFF; border-right: 1px solid #E6E8EC; padding: 22px 14px; display: flex; flex-direction: column; gap: 2px">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 0 10px 22px"><span style="width: 30px; height: 30px; border-radius: 8px; background: #1B2440; display: flex; align-items: center; justify-content: center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7"></path></svg></span><span style="font-size: 22px; font-weight: 700; letter-spacing: -0.02em">Quote Agent</span></div>
+  <div style="padding: 24px 12px 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: #5B6478">MAIN MENU</div>
+  <sc-for list="{{nav.main}}" as="n" hint-placeholder-count="5">
+    <a href="{{n.href}}" style="display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border-radius: 8px; background: {{n.bg}}; color: #1B2440; text-decoration: none; font-size: 15px; font-weight: {{n.fw}}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{n.d}}"></path></svg><span style="flex: 1">{{n.label}}</span><sc-if value="{{n.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; font-weight: 600; background: #FDE7DF; color: #A3260C; border-radius: 999px; padding: 1px 8px">{{n.badge}}</span></sc-if></a>
+  </sc-for>
+  <div style="margin-top: auto; padding: 16px 12px 0; font-size: 12px; color: #5B6478; display: flex; flex-direction: column; gap: 2px"><span>Northline Couriers · sample data</span><a href="#" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 13px; font-weight: 600; text-decoration: none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v6h6M20 20v-6h-6M5 10a8 8 0 0 1 14-3M19 14a8 8 0 0 1-14 3"></path></svg>Reset demo</a></div>
+</nav>
+<main style="flex: 999 1 640px; min-width: 0; padding: 22px 32px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+  <div style="display: flex; align-items: center; gap: 12px; font-size: 15px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg><span>Ask</span></div>
+  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 20px"></div>
+</div>
+<div style="display: flex; align-items: center; gap: 12px"><h1 style="margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.01em">Ask about your prices</h1><span style="font-size: 11px; font-weight: 600; background: #FDE68A; color: #92400E; border-radius: 4px; padding: 3px 8px">BETA</span></div>
+<article style="background: #FFFFFF; border: 1px solid #E6E8EC; border-radius: 6px; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06); display: flex; flex-wrap: wrap; overflow: hidden">
+  <div style="flex: 1 1 128px; padding: 8px; display: flex; flex-direction: column; gap: 18px; background: #B9D6FB">
+    <div style="background: #FFFFFF; border-radius: 4px; padding: 14px 8px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; color: #1D4ED8"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span style="font-size: 13px; font-weight: 600">New quote</span></div>
+    <div style="font-size: 13px; line-height: 1.4; padding: 0 6px"><strong>Arrived</strong><br>Today 14:32</div>
+  </div>
+  <div style="flex: 999 1 460px; min-width: 0; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px"><h2 style="margin: 0; font-size: 18px; font-weight: 500">M6 Express – London → Manchester £270</h2></div>
+    <span style="align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; border: 1.5px dashed #2F9E5A; background: #F3FBF6; color: #1E7A44; border-radius: 4px; padding: 7px 12px; font-size: 13px; font-weight: 500"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>Handled automatically – waiting for your approval</span>
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px">
+      <p style="margin: 0; font-size: 15px; line-height: 1.5; flex: 1 1 320px">The agent read the email, sorted the job as Standard and found it is <strong>8% cheaper</strong> than Swift Haul. Draft price list v4 is ready.</p>
+      <a href="price-lists.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 4px; background: #1D4ED8; color: #FFFFFF; text-decoration: none; font-size: 13px; font-weight: 600; letter-spacing: 0.03em">REVIEW V4</a>
+    </div>
+  </div>
+</article>
+
+<article style="background: #FFFFFF; border: 1px solid #E6E8EC; border-radius: 6px; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.06); display: flex; flex-wrap: wrap; overflow: hidden; flex-direction: column; padding: 22px; gap: 16px">
+  <div style="align-self: flex-end; max-width: 75%; background: #1B2440; color: #FFFFFF; border-radius: 10px 10px 2px 10px; padding: 12px 16px; font-size: 15px">What’s our typical cost for London to Manchester?</div>
+  <div style="display: flex; flex-wrap: wrap; gap: 6px">
+    <span style="font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: #EEF0F4; border-radius: 3px; padding: 3px 7px">query_approved_quotes</span>
+    <span style="font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: #EEF0F4; border-radius: 3px; padding: 3px 7px">filter: London → Manchester</span>
+    <span style="font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: #EEF0F4; border-radius: 3px; padding: 3px 7px">compute_typical</span>
+  </div>
+  <div style="max-width: 640px; display: flex; flex-direction: column; gap: 12px">
+    <p style="margin: 0; font-size: 16px; line-height: 1.55">For a standard weekday job the typical cost is <strong>£283</strong>, based on 2 approved quotes. The weekend rate is <strong>£320</strong>.</p>
+    <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: #4A5368">QUOTES USED</span>
+    <sc-for list="{{used}}" as="u" hint-placeholder-count="3">
+      <div style="display: flex; align-items: center; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid #EEF0F3">
+        <span style="flex: none; width: 36px; height: 36px; border-radius: 50%; background: {{u.bg}}; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">{{u.ini}}</span>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 14px"><strong style="font-weight: 600">{{u.supplier}}</strong><span style="color: #5B6478; font-size: 13px">{{u.detail}}</span></div>
+        <a href="#" style="display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; font-weight: 600; letter-spacing: 0.03em; text-decoration: none">OPEN</a>
+      </div>
+    </sc-for>
+    <p style="margin: 0; font-size: 14px; color: #4A5368">Only two suppliers have quoted this route, so treat it as a rough guide.</p>
+  </div>
+  <div style="display: flex; flex-wrap: wrap; gap: 8px">
+    <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid #C9CED8; background: #FFFFFF; color: #1B2440; font: inherit; font-size: 14px">Which supplier is cheapest for Leeds?</button>
+    <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid #C9CED8; background: #FFFFFF; color: #1B2440; font: inherit; font-size: 14px">What changed since v2?</button>
+    <button type="button" style="min-height: 44px; padding: 0 14px; border-radius: 999px; border: 1px solid #C9CED8; background: #FFFFFF; color: #1B2440; font: inherit; font-size: 14px">Our margin on Specialist jobs?</button>
+  </div>
+  <div style="display: flex; gap: 8px">
+    <label for="ask" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Ask a question</label>
+    <input id="ask" type="text" placeholder="Ask anything about your quotes and prices…" style="flex: 1; min-width: 0; min-height: 48px; padding: 0 16px; border-radius: 4px; border: 1px solid #C9CED8; background: #FFFFFF; font: inherit; font-size: 15px; color: #1B2440">
+    <button type="button" style="min-height: 48px; padding: 0 20px; border-radius: 4px; border: none; background: #1D4ED8; color: #FFFFFF; font: inherit; font-size: 13px; font-weight: 600; letter-spacing: 0.03em">ASK</button>
+  </div>
+</article>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const used = [
+      { ini: 'SH', bg: '#CDBDF2', supplier: 'Swift Haul Ltd', detail: '£295 · weekday · 3 Nov' },
+      { ini: 'M6', bg: '#B9D6FB', supplier: 'M6 Express', detail: '£270 · weekday · today' },
+      { ini: 'SH', bg: '#CDBDF2', supplier: 'Swift Haul Ltd', detail: '£320 · weekend · 5 Nov' }
+    ];
+    return { nav: this.nav('ask'), used };
+  }
+  nav(active) {
+    const P = {
+      inbox: 'M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z',
+      agent: 'M7 7h10v10H7zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3',
+      review: 'M4 4h16v16H4zM8 12l3 3 5-6',
+      price: 'M3 12V4h8l10 10-8 8zM7.5 7.5h.01',
+      ask: 'M4 5h16v11H9l-5 4z'
+    };
+    const mk = (k, label, href, badge) => {
+      const on = k === active;
+      return { label, href, d: P[k], badge: badge || '', hasBadge: !!badge, bg: on ? '#EEF0F4' : 'transparent', fw: on ? '600' : '400' };
+    };
+    return {
+      main: [mk('inbox', 'Inbox', 'Inbox.dc.html'), mk('agent', 'Agent run', 'AgentRun.dc.html'), mk('review', 'Review queue', 'Review.dc.html', '4'), mk('price', 'Price lists', 'Pricing.dc.html'), mk('ask', 'Ask', 'Ask.dc.html')]
+    };
+  }
+}
+</script>
+</body>
+</html>

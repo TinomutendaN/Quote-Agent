@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
   partialPrefetching: true,
   // Stop `next dev` from writing its own block into our AGENTS.md.
   agentRules: false,
+  // The Inbox reads email subject lines from the sample files on the server.
+  outputFileTracingIncludes: {
+    "/inbox": ["./public/samples/*.txt"],
+  },
   turbopack: {
     rules: {
       "*.css": {

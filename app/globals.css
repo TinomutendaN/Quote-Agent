@@ -1,26 +1,87 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Design tokens, copied from docs/design/*.dc.html.
+ * The designs are light-only, so there is no dark theme.
+ * Use them as Tailwind classes, e.g. bg-page, text-ink, border-line,
+ * rounded-card, shadow-card.
+ */
+@theme {
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+
+  /* Text */
+  --color-ink: #1b2440;
+  --color-slate: #4a5368;
+  --color-muted: #5b6478;
+
+  /* Surfaces and borders */
+  --color-page: #fafbfc;
+  --color-line: #e6e8ec;
+  --color-line-soft: #eef0f3;
+  --color-line-strong: #c9ced8;
+  --color-pill: #e9ebef;
+  --color-nav-active: #eef0f4;
+  --color-well: #f4f5f7;
+
+  /* Actions */
+  --color-primary: #1d4ed8;
+  --color-primary-hover: #1e3a8a;
+
+  /* Pastel status panels */
+  --color-salmon: #fbbdab;
+  --color-sky: #b9d6fb;
+  --color-lavender: #cdbdf2;
+  --color-mint: #bdebd3;
+  --color-butter: #fde68a;
+
+  /* Status text that sits on a pastel panel */
+  --color-on-salmon: #a3260c;
+  --color-on-sky: #1d4ed8;
+  --color-on-lavender: #5b21b6;
+  --color-on-mint: #1e7a44;
+  --color-on-butter: #92400e;
+
+  /* Progress bars */
+  --color-ready: #5bd6a4;
+  --color-need: #fdba3a;
+
+  /* Sidebar badge */
+  --color-badge: #fde7df;
+  --color-on-badge: #a3260c;
+
+  /* Dashed pills */
+  --color-ok-line: #2f9e5a;
+  --color-ok-bg: #f3fbf6;
+  --color-warn-line: #d97706;
+  --color-warn-bg: #fffbeb;
+  --color-warn-text: #92400e;
+
+  /* Radii */
+  --radius-card: 6px;
+  --radius-btn: 4px;
+  --radius-pill: 3px;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.06);
+  --shadow-tile: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-float: 0 8px 24px rgba(16, 24, 40, 0.08);
+  --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.12);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* In the base layer so Tailwind classes (e.g. text-ink on menu links) win. */
+@layer base {
+  html,
+  body {
+    margin: 0;
+    background: var(--color-page);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  a {
+    color: var(--color-primary);
+  }
+  a:hover {
+    color: var(--color-primary-hover);
+  }
 }
