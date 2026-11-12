@@ -13,8 +13,8 @@ Solo developer, 48-hour build, deployed on Vercel. The app is built **one screen
 | 2 – Database | Done |
 | 3 – Sample quote files | Done |
 | 4 – Shell + Inbox | Done |
-| 5 – The agent (no screen) | Next |
-| 6 – Agent run screen | |
+| 5 – The agent (no screen) | Done |
+| 6 – Agent run screen | Next |
 | 7 – Review queue | |
 | 8 – Price lists | |
 | 9 – Ask + the new quote | |
@@ -57,7 +57,8 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - **Categories** are stored as shown on screen: `Standard`, `Out-of-hours`, `Specialist`. A quote line's category can be empty until the rules sort it.
 - **Status and reason codes** are lowercase: e.g. `needs_review`, `price_wrong`, `duplicate`, `unclear`, `unknown_sender`.
 - **Routes** are one text field, `Origin → Destination`. Matching different spellings of the same route (e.g. "Leeds - Bristol") is the job of `compare_history`.
-- **Extra columns** beyond the original plan: `source_files.sender_name`, `suppliers.initials`, `review_items.resolved_at`.
+- **Extra columns** beyond the original plan: `source_files.sender_name`, `suppliers.initials`, `review_items.resolved_at`, `quote_lines.time_slot` (`weekday`/`evening`/`overnight`/`weekend`) and `quote_lines.goods` (`general`/`chilled_medical`/`fragile`/`secure`). Two lines are the same job (a possible duplicate) only when supplier, route, category, time slot and goods all match and they come from different files.
+- **Rule precedence:** Specialist (rule 2) wins over Out-of-hours (rule 1), e.g. chilled goods on a Saturday are Specialist.
 
 **Pricing**
 - **Price list rule:** for each route and service, use the cheapest approved quote (excluding past prices).

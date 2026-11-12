@@ -63,6 +63,10 @@ CREATE TABLE quote_lines (
   price           numeric(10, 2) NOT NULL CHECK (price >= 0),
   unit_note       text,                                                   -- e.g. "per pallet", "per job"
   vat_note        text,                                                   -- e.g. "ex VAT"
+  -- When the job runs and what is carried. Two quotes are only the "same job"
+  -- (a duplicate) when route, category, time_slot and goods all match.
+  time_slot       text CHECK (time_slot IN ('weekday', 'evening', 'overnight', 'weekend')),
+  goods           text CHECK (goods IN ('general', 'chilled_medical', 'fragile', 'secure')),
   quote_date      date,
   status          text NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('pending', 'approved', 'rejected')),

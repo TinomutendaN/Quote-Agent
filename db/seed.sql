@@ -57,35 +57,35 @@ ORDER BY v.file_name;
 -- Every price is within 15% of the matching prices in the sample files,
 -- except Leeds → Bristol, where the usual £160 makes the £480 scan stand out.
 -- ---------------------------------------------------------------------------
-INSERT INTO quote_lines (supplier_id, route, category, rule_number, price, unit_note, vat_note, quote_date, status, is_history)
-SELECT s.id, v.route, v.category, v.rule_number, v.price, 'per job', 'ex VAT', v.quote_date::date, 'approved', true
+INSERT INTO quote_lines (supplier_id, route, category, rule_number, price, unit_note, vat_note, time_slot, goods, quote_date, status, is_history)
+SELECT s.id, v.route, v.category, v.rule_number, v.price, 'per job', 'ex VAT', v.time_slot, v.goods, v.quote_date::date, 'approved', true
 FROM (VALUES
   -- Leeds → Bristol: usual about £160
-  ('Pennine Freight',     'Leeds → Bristol',              'Standard',     3, 158.00, '2026-10-02'),
-  ('Riverside Logistics', 'Leeds → Bristol',              'Standard',     3, 160.00, '2026-10-07'),
-  ('Pennine Freight',     'Leeds → Bristol',              'Standard',     3, 162.00, '2026-10-12'),
+  ('Pennine Freight',     'Leeds → Bristol',              'Standard',     3, 158.00, '2026-10-02', 'weekday', 'general'),
+  ('Riverside Logistics', 'Leeds → Bristol',              'Standard',     3, 160.00, '2026-10-07', 'weekday', 'general'),
+  ('Pennine Freight',     'Leeds → Bristol',              'Standard',     3, 162.00, '2026-10-12', 'weekday', 'general'),
   -- London → Manchester weekday: usual about £290
-  ('Swift Haul Ltd',      'London → Manchester',          'Standard',     3, 295.00, '2026-10-05'),
-  ('Swift Haul Ltd',      'London → Manchester',          'Standard',     3, 285.00, '2026-10-22'),
+  ('Swift Haul Ltd',      'London → Manchester',          'Standard',     3, 295.00, '2026-10-05', 'weekday', 'general'),
+  ('Swift Haul Ltd',      'London → Manchester',          'Standard',     3, 285.00, '2026-10-22', 'weekday', 'general'),
   -- London → Manchester Saturday: usual about £330
-  ('Swift Haul Ltd',      'London → Manchester',          'Out-of-hours', 1, 335.00, '2026-10-05'),
-  ('Swift Haul Ltd',      'London → Manchester',          'Out-of-hours', 1, 325.00, '2026-10-22'),
+  ('Swift Haul Ltd',      'London → Manchester',          'Out-of-hours', 1, 335.00, '2026-10-05', 'weekend', 'general'),
+  ('Swift Haul Ltd',      'London → Manchester',          'Out-of-hours', 1, 325.00, '2026-10-22', 'weekend', 'general'),
   -- Other routes
-  ('Swift Haul Ltd',      'London → Birmingham',          'Standard',     3, 215.00, '2026-10-05'),
-  ('Swift Haul Ltd',      'London → Birmingham',          'Standard',     3, 205.00, '2026-10-22'),
-  ('Swift Haul Ltd',      'London → Leeds',               'Standard',     3, 280.00, '2026-10-05'),
-  ('Pennine Freight',     'Leeds → Manchester',           'Standard',     3, 145.00, '2026-10-02'),
-  ('Pennine Freight',     'Leeds → Sheffield',            'Standard',     3, 110.00, '2026-10-06'),
-  ('Riverside Logistics', 'Leeds → Sheffield',            'Standard',     3, 106.00, '2026-10-09'),
-  ('Riverside Logistics', 'Castleford → Manchester',      'Standard',     3, 135.00, '2026-10-07'),
-  ('Riverside Logistics', 'Leeds → Cardiff',              'Standard',     3, 170.00, '2026-10-07'),
-  ('M6 Express',          'Birmingham → London',          'Standard',     3, 205.00, '2026-10-08'),
-  ('M6 Express',          'Birmingham → Manchester',      'Standard',     3, 165.00, '2026-10-08'),
-  ('M6 Express',          'Birmingham → London',          'Out-of-hours', 1, 265.00, '2026-10-08'),
-  ('Capital Same-Day',    'Bristol hospital → Filton lab', 'Specialist',  2, 232.00, '2026-10-01'),
-  ('Capital Same-Day',    'Bristol → Swindon',            'Specialist',   2, 300.00, '2026-10-01'),
-  ('Capital Same-Day',    'Bristol → Bath',               'Standard',     3,  75.00, '2026-10-01')
-) AS v(supplier_name, route, category, rule_number, price, quote_date)
+  ('Swift Haul Ltd',      'London → Birmingham',          'Standard',     3, 215.00, '2026-10-05', 'weekday', 'general'),
+  ('Swift Haul Ltd',      'London → Birmingham',          'Standard',     3, 205.00, '2026-10-22', 'weekday', 'general'),
+  ('Swift Haul Ltd',      'London → Leeds',               'Standard',     3, 280.00, '2026-10-05', 'weekday', 'general'),
+  ('Pennine Freight',     'Leeds → Manchester',           'Standard',     3, 145.00, '2026-10-02', 'weekday', 'general'),
+  ('Pennine Freight',     'Leeds → Sheffield',            'Standard',     3, 110.00, '2026-10-06', 'weekday', 'general'),
+  ('Riverside Logistics', 'Leeds → Sheffield',            'Standard',     3, 106.00, '2026-10-09', 'weekday', 'general'),
+  ('Riverside Logistics', 'Castleford → Manchester',      'Standard',     3, 135.00, '2026-10-07', 'weekday', 'general'),
+  ('Riverside Logistics', 'Leeds → Cardiff',              'Standard',     3, 170.00, '2026-10-07', 'weekday', 'general'),
+  ('M6 Express',          'Birmingham → London',          'Standard',     3, 205.00, '2026-10-08', 'weekday', 'general'),
+  ('M6 Express',          'Birmingham → Manchester',      'Standard',     3, 165.00, '2026-10-08', 'weekday', 'general'),
+  ('M6 Express',          'Birmingham → London',          'Out-of-hours', 1, 265.00, '2026-10-08', 'evening', 'general'),
+  ('Capital Same-Day',    'Bristol Royal Infirmary → Filton', 'Specialist', 2, 232.00, '2026-10-01', 'weekday', 'chilled_medical'),
+  ('Capital Same-Day',    'Bristol → Swindon',            'Specialist',   2, 300.00, '2026-10-01', 'weekday', 'fragile'),
+  ('Capital Same-Day',    'Bristol → Bath',               'Standard',     3,  75.00, '2026-10-01', 'weekday', 'general')
+) AS v(supplier_name, route, category, rule_number, price, quote_date, time_slot, goods)
 JOIN suppliers s ON s.name = v.supplier_name;
 
 -- ---------------------------------------------------------------------------
