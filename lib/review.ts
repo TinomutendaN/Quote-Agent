@@ -2,6 +2,7 @@
 // side effects, safe in the browser.
 import type { IconName } from "@/components/Icon";
 import type { ReasonType, ReviewLine } from "./db";
+import { formatMoney } from "./pricing";
 
 /** Colour strip on each review card, by reason (from docs/design/review.dc.html). */
 export const REASON_STRIP: Record<ReasonType, string> = {
@@ -23,16 +24,9 @@ export const REASON_TABS: { key: ReasonTab; label: string; icon: IconName }[] = 
 
 export const SERVICES = ["Standard", "Out-of-hours", "Specialist"] as const;
 
-const money = new Intl.NumberFormat("en-GB", {
-  style: "currency",
-  currency: "GBP",
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 2,
-});
-
-/** "£480", "£155.50". */
+/** "£480", "£155.50" (same rule as the price lists). */
 export function formatPrice(price: string | number): string {
-  return money.format(Number(price));
+  return formatMoney(price);
 }
 
 const SLOT_WORD: Record<string, string> = {

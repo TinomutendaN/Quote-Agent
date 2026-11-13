@@ -13,15 +13,18 @@ export function StatusCard({
   colour,
   panel,
   children,
+  hidePanelInPrint = false,
 }: {
   colour: string;
   panel: ReactNode;
   children: ReactNode;
+  /** Leave the status panel out of printouts (Price lists Export PDF). */
+  hidePanelInPrint?: boolean;
 }) {
   return (
     <article className={`${cardShell} flex-wrap`}>
       <div
-        className="flex flex-[1_1_128px] flex-col gap-[18px] p-2"
+        className={`flex flex-[1_1_128px] flex-col gap-[18px] p-2 ${hidePanelInPrint ? "print:hidden" : ""}`}
         style={{ background: colour }}
       >
         {panel}

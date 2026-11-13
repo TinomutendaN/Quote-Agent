@@ -16,8 +16,8 @@ Solo developer, 48-hour build, deployed on Vercel. The app is built **one screen
 | 5 – The agent (no screen) | Done |
 | 6 – Agent run screen | Done |
 | 7 – Review queue | Done |
-| 8 – Price lists | Next |
-| 9 – Ask + the new quote | |
+| 8 – Price lists | Done |
+| 9 – Ask + the new quote | Next |
 | 10 – Landing + Reset demo | |
 | 11 – Full testing | |
 | 12 – Demo video | |
@@ -101,9 +101,20 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
   - Unknown sender: Approve and Edit both open a supplier picker; once chosen, the supplier is set on the file and all its lines, and they're approved. Reject rejects all the file's lines.
 - **Atomic:** every action is one SQL statement in `lib/db.ts` that only runs while the item is open (`… WHERE status = 'open'`), and records the item's status (`approved` / `edited` / `rejected`) and `resolved_at`. A second visitor gets 409 and sees "Already handled". Endpoint: `POST /api/review`.
 - **Edit and service:** changing a line's service clears its `rule_number` (a person decided it, not a rule). Edited routes go through `tidyRoute`.
-- **Automatic approval:** lines the agent never flagged (no review item on the line, no file-level item on its file) become approved when their file finishes: `approveUnflaggedLines()` in `lib/db.ts`, called in `runAgent` for inbox files, file 16 and uploads. It's idempotent, and `npm run db:processed` runs the same SQL (`APPROVE_UNFLAGGED_SQL`) after loading the fixture, so the fixture needs no regenerating.
+- **Automatic approval:** lines the agent never flagged (no review item on the line, no file-level item on its file) become approved when their file finishes: `approveUnflaggedLines()` in `lib/db.ts`, called in `runAgent` for inbox files and uploads (never file 16, which waits for v4 – see Price lists). It's idempotent, and `npm run db:processed` runs the same SQL (`APPROVE_UNFLAGGED_SQL`) after loading the fixture, so the fixture needs no regenerating.
 - **"Needs you" = open review items, not file status.** `source_files.status` stays as the agent left it (a record of what it found). Agent run's "Need you" bar counts inbox files with at least one open item (handled files count as Ready); a card shows "Needs you" only while its file has an open item, otherwise "Reviewed" (sky blue; the end circle still says "Sent to review"). Inbox tiles say "· needs you" only while the file has an open item. The sidebar badge and "Open review queue (n)" count open items.
 - **Live counts:** after each action the Review page calls `router.refresh()` (list and sidebar badge). Agent run re-reads the database on navigation and when its tab regains focus.
+
+**Price lists (Step 8)**
+- **File 16 waits for v4:** the held-back file's lines are never approved automatically (`APPROVE_UNFLAGGED_SQL` skips `is_held_back` files, and `npm run db:processed` uses the same SQL, so file 16's £270 stays pending). The current list therefore doesn't include it; Step 9 approves it when draft v4 is saved.
+- **Rows:** one row per route + service + time slot + goods + unit, taking the cheapest approved line (never past prices, rejected or pending lines). Ties go to the most recent quote. Unit is the lower-cased `unit_note`; empty means "per job". The service shows its detail when it isn't the default: every non-weekday slot and every non-general goods type, e.g. "Out-of-hours · overnight", "Specialist · chilled" (chilled_medical shows as "chilled"). The price shows its unit when it isn't per job, e.g. "£155 per pallet".
+- **One row format for every version:** `{route, category, time_slot, goods, unit, supplier, cost, markup_pct, sell, margin}` (`PriceRow` in `lib/pricing.ts`). `db/seed.sql` builds v1 and v2 in this format from the past prices. Compare matches rows on route + service + time slot + goods + unit; a row is "changed" when its supplier, cost, markup or sell price differs.
+- **Versions:** the current list is a draft numbered one above the latest saved version (v3 at first). It is worked out live from the approved quotes and is not stored. Save version stores it and the next draft becomes v4. If the draft (at the viewer's markup) is identical to the latest saved version, the header says "No changes since vN" and Save is disabled. The markup buttons (15 / 25 / 35%, +10 points Out-of-hours, +15 Specialist) change only the viewer's draft until it's saved; saved versions keep their own markup. Saved versions are labelled "Saved 13 Nov, 14:05" (UK time).
+- **Saving is safe for many visitors:** `POST /api/pricing` rebuilds the rows on the server (never trusting the browser's rows), refuses with 409 if the approved quotes changed since the page loaded (a signature of the rows), if the list is unchanged, or if someone else saved that version number first (one `INSERT … WHERE latest = version − 1`).
+- **Open review items:** while any review items are open, the draft shows "N quotes are still in the review queue and aren't in this list yet." with a link to the Review queue (N = open items, same as the sidebar badge). Saving is still allowed, and the message after saving repeats it ("Saved v3 – 4 quotes were still waiting for review."). The notice disappears when the queue is empty.
+- **Money** is stored to the penny and worked out in whole pence. It is shown without pence when it's whole pounds (£206, £206.25, £206.50). `formatMoney` in `lib/pricing.ts`; the Review queue uses the same rule.
+- **Export PDF** is the browser's print (Save as PDF). The sidebar, buttons, tabs, markup chips and the card's left panel are hidden in print, and the table prints in full with its header row on every page. It prints whichever list (Customer or Internal, draft or saved) is on screen.
+- **Testing:** `npm run db:processed` then `npm run pricing:check` checks the maths against hand calculations, v1 vs v2, and the draft list (expected numbers for both "4 items open" and "all 4 approved"). No model calls.
 
 ## What's already built (Steps 0–3)
 

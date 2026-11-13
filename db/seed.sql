@@ -89,9 +89,12 @@ FROM (VALUES
 JOIN suppliers s ON s.name = v.supplier_name;
 
 -- ---------------------------------------------------------------------------
--- Saved price lists v1 and v2, built from the history lines above:
--- cheapest approved price per route and service, markup 25% Standard,
--- 35% Out-of-hours (+10 points), 40% Specialist (+15 points).
+-- Saved price lists v1 and v2, built from the history lines above with the
+-- same rules and row format as new versions (lib/pricing.ts): the cheapest
+-- approved price per route + service + time slot + goods + unit, markup 25%
+-- Standard, 35% Out-of-hours (+10 points), 40% Specialist (+15 points).
+-- Each row: {route, category, time_slot, goods, unit, supplier, cost,
+-- markup_pct, sell, margin}, money in pounds to the penny.
 -- v1 uses prices up to 14 Oct; v2 adds Swift Haul's cheaper 22 Oct prices.
 -- ---------------------------------------------------------------------------
 INSERT INTO price_lists (version, label, status, markup, rows, created_at)
@@ -100,15 +103,20 @@ SELECT p.version, p.label, 'saved', m.markup,
          SELECT jsonb_agg(jsonb_build_object(
                   'route',      c.route,
                   'category',   c.category,
+                  'time_slot',  c.time_slot,
+                  'goods',      c.goods,
+                  'unit',       c.unit,
                   'supplier',   c.supplier,
                   'cost',       c.cost,
                   'markup_pct', c.pct,
                   'sell',       round(c.cost * (1 + c.pct / 100.0), 2),
                   'margin',     round(c.cost * (1 + c.pct / 100.0), 2) - c.cost
-                ) ORDER BY c.category, c.route)
+                ) ORDER BY c.route, c.category, c.time_slot, c.goods)
          FROM (
-           SELECT DISTINCT ON (q.route, q.category)
-                  q.route, q.category, s.name AS supplier, q.price AS cost,
+           SELECT DISTINCT ON (q.route, q.category, q.time_slot, q.goods, lower(coalesce(q.unit_note, 'per job')))
+                  q.route, q.category, q.time_slot, q.goods,
+                  lower(coalesce(q.unit_note, 'per job')) AS unit,
+                  s.name AS supplier, q.price AS cost,
                   CASE q.category
                     WHEN 'Standard'     THEN (m.markup->>'standard')::numeric
                     WHEN 'Out-of-hours' THEN (m.markup->>'out_of_hours')::numeric
@@ -117,7 +125,8 @@ SELECT p.version, p.label, 'saved', m.markup,
            FROM quote_lines q
            JOIN suppliers s ON s.id = q.supplier_id
            WHERE q.is_history AND q.status = 'approved' AND q.quote_date <= p.cutoff
-           ORDER BY q.route, q.category, q.price, q.quote_date DESC
+           ORDER BY q.route, q.category, q.time_slot, q.goods,
+                    lower(coalesce(q.unit_note, 'per job')), q.price, q.quote_date DESC
          ) c
        ), '[]'::jsonb),
        p.created_at

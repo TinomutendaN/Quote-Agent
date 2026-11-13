@@ -85,3 +85,33 @@
     color: var(--color-primary-hover);
   }
 }
+
+/*
+ * Export PDF (Price lists) uses the browser's print → Save as PDF. The sidebar
+ * and buttons carry print:hidden; here the page itself is made print-friendly.
+ */
+@media print {
+  @page {
+    margin: 14mm;
+  }
+  html,
+  body {
+    background: #ffffff;
+  }
+  main {
+    padding: 0 !important;
+  }
+  article {
+    box-shadow: none !important;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

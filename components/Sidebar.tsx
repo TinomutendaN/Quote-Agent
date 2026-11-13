@@ -10,7 +10,7 @@ export function Sidebar() {
   return (
     <nav
       aria-label="Main"
-      className="box-border flex max-w-full flex-[1_1_230px] flex-col gap-0.5 border-r border-line bg-white px-3.5 py-[22px]"
+      className="box-border flex max-w-full flex-[1_1_230px] flex-col gap-0.5 border-r border-line bg-white px-3.5 py-[22px] print:hidden"
     >
       <div className="flex items-center gap-2.5 px-2.5 pb-[22px]">
         <span className="flex h-[30px] w-[30px] items-center justify-center rounded-lg bg-ink text-white">

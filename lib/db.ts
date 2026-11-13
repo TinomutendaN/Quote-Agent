@@ -1,6 +1,7 @@
 // Database client and every SQL query (fixed and parameterised).
 // The model never writes SQL: agent and Ask tools call functions in this file.
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import type { Markup, PriceLine, PriceRow } from "./pricing";
 
 let client: NeonQueryFunction<false, false> | null = null;
 
@@ -54,24 +55,19 @@ export type SourceFile = {
   status: SourceFileStatus;
 };
 
-export type PriceListRow = {
-  route: string;
-  category: Category;
-  supplier: string;
-  cost: number;
-  markup_pct: number;
-  sell: number;
-  margin: number;
-};
+/** One row of a saved price list (same shape for every version, see lib/pricing.ts). */
+export type PriceListRow = PriceRow;
 
 export type PriceList = {
   id: number;
   version: number;
   label: string;
   status: "draft" | "saved";
-  markup: { standard: number; out_of_hours: number; specialist: number };
+  markup: Markup;
   rows: PriceListRow[];
   created_at: string;
+  /** UK time, e.g. "13 Nov 2026, 14:05" */
+  created_label: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -157,10 +153,71 @@ export async function countHistoryLines(): Promise<number> {
 /** All price lists, newest version first. */
 export async function listPriceLists(): Promise<PriceList[]> {
   return (await db()`
-    SELECT id, version, label, status, markup, rows, created_at::text AS created_at
+    SELECT id, version, label, status, markup, rows, created_at::text AS created_at,
+           to_char(created_at AT TIME ZONE 'Europe/London', 'FMDD Mon YYYY, HH24:MI') AS created_label
     FROM price_lists
     ORDER BY version DESC
   `) as PriceList[];
+}
+
+// ---------------------------------------------------------------------------
+// Price lists (Step 8). The maths lives in lib/pricing.ts.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every approved quote line that can go into a new price list: never past
+ * prices, never rejected or pending lines (so the held-back file 16 waits for
+ * v4), and only lines with a supplier and a service.
+ */
+export async function listCurrentPriceLines(): Promise<PriceLine[]> {
+  return (await db()`
+    SELECT q.id, q.route, q.category, q.time_slot, q.goods, q.unit_note,
+           s.name AS supplier, q.price::text AS price, q.quote_date::text AS quote_date
+    FROM quote_lines q
+    JOIN suppliers s ON s.id = q.supplier_id
+    WHERE NOT q.is_history AND q.status = 'approved' AND q.category IS NOT NULL
+    ORDER BY q.id
+  `) as PriceLine[];
+}
+
+/**
+ * Lines still waiting (pending) from finished inbox files and uploads, never
+ * the held-back file. The screen counts the jobs among them that aren't in
+ * the list yet, for "X/Y Routes approved".
+ */
+export async function listWaitingPriceLines(): Promise<PriceLine[]> {
+  return (await db()`
+    SELECT q.id, q.route, q.category, q.time_slot, q.goods, q.unit_note,
+           coalesce(s.name, '') AS supplier, q.price::text AS price, q.quote_date::text AS quote_date
+    FROM quote_lines q
+    JOIN source_files f ON f.id = q.source_file_id
+    LEFT JOIN suppliers s ON s.id = q.supplier_id
+    WHERE NOT q.is_history AND q.status = 'pending' AND q.category IS NOT NULL
+      AND NOT f.is_held_back AND f.status IN ('done', 'needs_review')
+    ORDER BY q.id
+  `) as PriceLine[];
+}
+
+/**
+ * Saves a new version, only if it is exactly one above the latest saved
+ * version (so two visitors can't both save the same number). Returns false
+ * when someone else saved first.
+ */
+export async function savePriceList(list: {
+  version: number;
+  label: string;
+  markup: Markup;
+  rows: PriceRow[];
+}): Promise<boolean> {
+  const rows = await db().query(
+    `INSERT INTO price_lists (version, label, status, markup, rows)
+     SELECT $1::int, $2::text, 'saved', $3::jsonb, $4::jsonb
+     WHERE (SELECT coalesce(max(version), 0) FROM price_lists WHERE status = 'saved') = $1::int - 1
+     ON CONFLICT (version) DO NOTHING
+     RETURNING id`,
+    [list.version, list.label, JSON.stringify(list.markup), JSON.stringify(list.rows)],
+  );
+  return rows.length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -778,6 +835,7 @@ export async function deleteStalledUploads(stallMinutes: number): Promise<number
 
 /**
  * Approves every line the agent never flagged, once its file has finished
+ * (never the held-back file 16: its quote waits for price list v4, Step 9)
  * (done or needs review). A line counts as flagged when a review item points
  * at it, or its whole file has a file-level item (unknown sender). Safe to
  * run any number of times. $1 = one file id, or null for every file.
@@ -788,6 +846,7 @@ export const APPROVE_UNFLAGGED_SQL = `
   FROM source_files f
   WHERE f.id = q.source_file_id
     AND f.status IN ('done', 'needs_review')
+    AND NOT f.is_held_back
     AND ($1::int IS NULL OR f.id = $1::int)
     AND NOT q.is_history
     AND q.status = 'pending'

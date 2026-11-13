@@ -115,14 +115,17 @@ CREATE TABLE agent_events (
 
 CREATE INDEX agent_events_file_time_idx ON agent_events (source_file_id, created_at);
 
--- Saved and draft price lists. rows is a snapshot so old versions never change.
+-- Saved price lists. rows is a snapshot so old versions never change. The
+-- current list is a draft worked out live from approved quotes (not stored).
 CREATE TABLE price_lists (
   id          serial PRIMARY KEY,
   version     integer NOT NULL UNIQUE,
   label       text NOT NULL,
   status      text NOT NULL CHECK (status IN ('draft', 'saved')),
   markup      jsonb NOT NULL,             -- {"standard":25,"out_of_hours":35,"specialist":40}
-  rows        jsonb NOT NULL,             -- [{route, category, supplier, cost, markup_pct, sell, margin}]
+  -- [{route, category, time_slot, goods, unit, supplier, cost, markup_pct, sell, margin}]
+  -- (same shape for every version, see lib/pricing.ts PriceRow; money to the penny)
+  rows        jsonb NOT NULL,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 

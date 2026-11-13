@@ -60,6 +60,8 @@ try {
     UNION ALL SELECT 'source_files (held back)', count(*)::int FROM source_files WHERE is_held_back
     UNION ALL SELECT 'quote_lines', count(*)::int FROM quote_lines
     UNION ALL SELECT 'quote_lines (history)', count(*)::int FROM quote_lines WHERE is_history
+    UNION ALL SELECT 'quote_lines (held back, pending)', count(*)::int FROM quote_lines q
+                JOIN source_files f ON f.id = q.source_file_id WHERE f.is_held_back AND q.status = 'pending'
     UNION ALL SELECT 'review_items', count(*)::int FROM review_items
     UNION ALL SELECT 'agent_events', count(*)::int FROM agent_events
     UNION ALL SELECT 'price_lists', count(*)::int FROM price_lists
