@@ -1,5 +1,8 @@
 // Rebuilds the database: runs db/schema.sql then db/seed.sql against DATABASE_URL.
-// Usage: npm run db:setup   (safe to re-run; it drops and recreates every table)
+// Usage: npm run db:setup       (safe to re-run; it drops and recreates every table)
+//        npm run db:processed   (same, then db/fixture-processed.sql: the database
+//                                looks exactly as if the agent had just finished,
+//                                with no model calls – for testing later steps)
 //
 // Uses Pool (WebSocket) from @neondatabase/serverless because a query with no
 // parameters goes over Postgres's simple query protocol, which accepts a whole
@@ -22,6 +25,13 @@ if (!url) {
 
 const schema = readFileSync(join(root, "db", "schema.sql"), "utf8");
 const seed = readFileSync(join(root, "db", "seed.sql"), "utf8");
+const processed = process.argv.includes("--processed");
+const fixturePath = join(root, "db", "fixture-processed.sql");
+if (processed && !existsSync(fixturePath)) {
+  console.error("db/fixture-processed.sql is missing. Make it with npm run db:export-processed.");
+  process.exit(1);
+}
+const fixture = processed ? readFileSync(fixturePath, "utf8") : null;
 
 const pool = new Pool({ connectionString: url });
 const client = await pool.connect();
@@ -32,6 +42,10 @@ try {
   await client.query(schema);
   console.log("Running db/seed.sql…");
   await client.query(seed);
+  if (fixture) {
+    console.log("Running db/fixture-processed.sql…");
+    await client.query(fixture);
+  }
   await client.query("COMMIT");
 
   const { rows } = await client.query(`
@@ -47,7 +61,7 @@ try {
     UNION ALL SELECT 'demo_run (' || status || ')', 1 FROM demo_run
   `);
   console.table(rows);
-  console.log("Database ready.");
+  console.log(processed ? "Database ready, as if the agent had just finished." : "Database ready.");
 } catch (err) {
   await client.query("ROLLBACK").catch(() => {});
   console.error("Database setup failed:", err.message);

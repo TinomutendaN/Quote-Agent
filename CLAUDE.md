@@ -39,6 +39,10 @@ Update this table at the end of each step.
 - `public/samples/README.md` is the answer key for every test of the agent.
 - Never run `vercel env pull`; it would overwrite `.env.local`.
 - When unsure about a requirement, ask instead of guessing.
+- Steps that don't need the agent (Review, Price lists, Landing, Reset) are tested with `npm run db:processed`, never with a new agent run. It loads `db/schema.sql`, `db/seed.sql` and `db/fixture-processed.sql` in one transaction, giving a database exactly as if the agent had just finished the inbox and file 16.
+- Before any test that calls the model, state how many runs or questions it will make and the expected cost, and keep model calls to the minimum needed. Ask before anything expected to cost more than $1.
+- Include the actual model cost in every step report.
+- If agent-related code changes, regenerate `db/fixture-processed.sql` from a fresh full run so it stays accurate: `npm run db:setup`, `npm run agent:test -- all`, `npm run agent:test -- 16`, check against `public/samples/README.md`, then `npm run db:export-processed`.
 
 ## Decisions already made
 
