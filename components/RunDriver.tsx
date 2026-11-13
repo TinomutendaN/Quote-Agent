@@ -39,7 +39,45 @@ type RunDriver = {
   resume: () => void;
   /** run_id for /api/run/live, so it can say whether this browser drives. */
   runId: string | null;
+  /** An upload from this browser is being processed. */
+  uploading: boolean;
+  /** Result or problem of the latest upload, shown on every app page. */
+  uploadMessage: UploadMessage | null;
+  dismissUploadMessage: () => void;
+  /** Sends one file to /api/upload. Returns once it's accepted or refused. */
+  upload: (file: File) => Promise<void>;
 };
+
+export type UploadMessage = { tone: "ok" | "error"; text: string };
+
+/** Kept in step with app/api/upload/route.ts. */
+export const UPLOAD_ACCEPT = ".txt,.eml,.pdf,.png,.jpg,.jpeg,.xlsx,.csv";
+const UPLOAD_EXTENSIONS = UPLOAD_ACCEPT.split(",").map((e) => e.slice(1));
+const UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
+const UPLOAD_TYPES_TEXT =
+  "emails (.txt or .eml), PDFs, photos (.png or .jpg), and spreadsheets (.xlsx or .csv)";
+
+/** Reads an NDJSON agent stream to the end; returns the last finish or error event. */
+async function readAgentStream(body: NonNullable<Response["body"]>) {
+  const reader = body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  let last: { type: string; [key: string]: unknown } | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) buffer += value;
+    const lines = buffer.split("\n");
+    buffer = done ? "" : (lines.pop() ?? "");
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        if (event.type === "finish" || event.type === "error") last = event;
+      } catch {}
+    }
+    if (done) break;
+  }
+  return last;
+}
 
 const Ctx = createContext<RunDriver | null>(null);
 
@@ -80,25 +118,8 @@ async function processFile(fileId: number, runId: string): Promise<boolean> {
       body: JSON.stringify({ source_file_id: fileId, run_id: runId }),
     });
     if (!res.ok || !res.body) return false;
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = "";
-    let finished = false;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (value) buffer += value;
-      const lines = buffer.split("\n");
-      buffer = done ? "" : (lines.pop() ?? "");
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line);
-          if (event.type === "finish") finished = true;
-          if (event.type === "error") finished = false;
-        } catch {}
-      }
-      if (done) break;
-    }
-    return finished;
+    const last = await readAgentStream(res.body);
+    return last?.type === "finish";
   } catch {
     return false;
   }
@@ -129,6 +150,9 @@ export function RunDriverProvider({ children }: { children: ReactNode }) {
   const [paused, setPaused] = useState(false);
   const [starting, setStarting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<UploadMessage | null>(null);
+  const uploadingRef = useRef(false);
 
   const runIdRef = useRef<string | null>(null);
   const activeRef = useRef(false);
@@ -281,6 +305,67 @@ export function RunDriverProvider({ children }: { children: ReactNode }) {
     else void drive();
   }, [drive]);
 
+  const upload = useCallback(
+    async (file: File) => {
+      if (uploadingRef.current) return;
+      const ext = file.name.toLowerCase().split(".").pop() ?? "";
+      if (!file.name.includes(".") || !UPLOAD_EXTENSIONS.includes(ext)) {
+        setUploadMessage({ tone: "error", text: `That type of file can't be read. You can add ${UPLOAD_TYPES_TEXT}.` });
+        return;
+      }
+      if (file.size > UPLOAD_MAX_BYTES) {
+        setUploadMessage({ tone: "error", text: "That file is too big – the limit is 4 MB." });
+        return;
+      }
+      uploadingRef.current = true;
+      setUploading(true);
+      setUploadMessage(null);
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch("/api/upload", { method: "POST", body: form });
+        if (!res.ok || !res.body) {
+          const body = await res.json().catch(() => null);
+          setUploadMessage({
+            tone: "error",
+            text: body?.error ?? "Something went wrong adding this file – try again.",
+          });
+          return;
+        }
+        // Accepted: watch it on Agent run while the stream runs to the end.
+        router.push("/agent");
+        const last = await readAgentStream(res.body);
+        if (last?.type === "finish") {
+          const lines = Number(last.lines_saved ?? 0);
+          const reviews = Number(last.review_items ?? 0);
+          setUploadMessage({
+            tone: "ok",
+            text:
+              `Added ${file.name}: ${plural(lines, "price")} found` +
+              (reviews > 0 ? `, ${plural(reviews, "item")} sent to review.` : "."),
+          });
+        } else {
+          setUploadMessage({
+            tone: "error",
+            text:
+              typeof last?.message === "string"
+                ? `${file.name}: ${last.message}`
+                : "Something went wrong reading this file – try again.",
+          });
+        }
+      } catch {
+        setUploadMessage({ tone: "error", text: "Something went wrong reading this file – try again." });
+      } finally {
+        uploadingRef.current = false;
+        setUploading(false);
+        router.refresh();
+      }
+    },
+    [router],
+  );
+
+  const dismissUploadMessage = useCallback(() => setUploadMessage(null), []);
+
   const value = useMemo<RunDriver>(
     () => ({
       isDriver: runId !== null,
@@ -292,9 +377,58 @@ export function RunDriverProvider({ children }: { children: ReactNode }) {
       pause,
       resume,
       runId,
+      uploading,
+      uploadMessage,
+      dismissUploadMessage,
+      upload,
     }),
-    [runId, active, paused, starting, notice, processInbox, pause, resume],
+    [
+      runId,
+      active,
+      paused,
+      starting,
+      notice,
+      processInbox,
+      pause,
+      resume,
+      uploading,
+      uploadMessage,
+      dismissUploadMessage,
+      upload,
+    ],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/** The latest upload's result or problem, on whichever app page is open. */
+export function UploadBanner() {
+  const { uploadMessage, dismissUploadMessage, uploading } = useRunDriver();
+  if (uploading && !uploadMessage) {
+    return (
+      <p role="status" className="m-0 text-sm text-slate">
+        Reading your file… it appears on Agent run as the agent works.
+      </p>
+    );
+  }
+  if (!uploadMessage) return null;
+  const tones =
+    uploadMessage.tone === "ok"
+      ? "border-ok-line bg-ok-bg text-on-mint"
+      : "border-warn-line bg-warn-bg text-warn-text";
+  return (
+    <div
+      role={uploadMessage.tone === "ok" ? "status" : "alert"}
+      className={`flex flex-wrap items-center justify-between gap-2 rounded-btn border-[1.5px] border-dashed px-3 py-[7px] text-[13px] font-medium ${tones}`}
+    >
+      <span>{uploadMessage.text}</span>
+      <button
+        type="button"
+        onClick={dismissUploadMessage}
+        className="min-h-11 cursor-pointer border-0 bg-transparent px-2 text-[13px] font-semibold text-inherit"
+      >
+        Close
+      </button>
+    </div>
+  );
 }

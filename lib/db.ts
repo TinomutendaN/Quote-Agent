@@ -703,3 +703,67 @@ export async function getRunSnapshot(): Promise<RunSnapshot> {
     events: events as SnapshotEvent[],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Uploads ("Add quotes", Step 6). Kept apart from the inbox run.
+// ---------------------------------------------------------------------------
+
+/** Most uploads per reset. Counted from source_files, so reset clears it. */
+export const MAX_UPLOADS = 10;
+
+/**
+ * Adds an uploaded file, already claimed (status working), unless the
+ * upload limit is reached. The advisory lock makes the count-and-insert safe
+ * when two uploads arrive at once. Returns the new id, or null at the limit.
+ */
+export async function insertUpload(file: {
+  fileName: string;
+  type: SourceFileType;
+}): Promise<number | null> {
+  const results = await db().transaction((tx) => [
+    tx`SELECT pg_advisory_xact_lock(6006)`,
+    tx`INSERT INTO source_files (supplier_id, sender_name, file_name, file_path, type,
+                                 received_at, is_held_back, is_upload, status)
+       SELECT NULL, NULL, ${file.fileName}, '', ${file.type}, now(), false, true, 'working'
+       WHERE (SELECT count(*) FROM source_files WHERE is_upload) < ${MAX_UPLOADS}
+       RETURNING id`,
+  ]);
+  const rows = results[1] as { id: number }[];
+  return rows[0]?.id ?? null;
+}
+
+/** identify_supplier: sets (or clears) an upload's supplier, also on lines already saved. */
+export async function setUploadSupplier(
+  fileId: number,
+  supplierId: number | null,
+  senderName: string | null,
+): Promise<void> {
+  await db().transaction((tx) => [
+    tx`UPDATE source_files SET supplier_id = ${supplierId}, sender_name = ${senderName}
+       WHERE id = ${fileId} AND is_upload`,
+    tx`UPDATE quote_lines SET supplier_id = ${supplierId}
+       WHERE source_file_id = ${fileId} AND NOT is_history
+         AND EXISTS (SELECT 1 FROM source_files WHERE id = ${fileId} AND is_upload)`,
+  ]);
+}
+
+/** Deletes one upload with its lines, review items and events (all cascade). */
+export async function deleteUpload(fileId: number): Promise<void> {
+  await db()`DELETE FROM source_files WHERE id = ${fileId} AND is_upload`;
+}
+
+/**
+ * Uploads still working with no activity for `stallMinutes` (their request
+ * was cut off, so the clean-up after a failure never ran) are deleted with
+ * their lines, review items and events, freeing their slots.
+ */
+export async function deleteStalledUploads(stallMinutes: number): Promise<number> {
+  const rows = await db()`
+    DELETE FROM source_files f
+    WHERE f.is_upload AND f.status = 'working'
+      AND COALESCE((SELECT max(e.created_at) FROM agent_events e WHERE e.source_file_id = f.id),
+                   f.received_at) < now() - make_interval(mins => ${stallMinutes}::int)
+    RETURNING f.id
+  `;
+  return rows.length;
+}

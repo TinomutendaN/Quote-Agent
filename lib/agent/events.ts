@@ -8,7 +8,8 @@ export type AgentToolName =
   | "apply_rules"
   | "compare_history"
   | "check_duplicates"
-  | "flag_for_review";
+  | "flag_for_review"
+  | "identify_supplier";
 
 export type AgentStartEvent = {
   type: "start";

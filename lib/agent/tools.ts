@@ -7,6 +7,7 @@ import {
   type Category,
   type QuoteLine,
   type SourceFile,
+  type Supplier,
   fileReceivedLabel,
   findDuplicateLines,
   getFileQuoteLine,
@@ -15,6 +16,7 @@ import {
   insertReviewItem,
   pastPricesForRoute,
   setQuoteLineCategory,
+  setUploadSupplier,
 } from "@/lib/db";
 import type { AgentStepEvent, AgentToolName } from "./events";
 
@@ -100,7 +102,15 @@ function refuse(text: string, error: string) {
   return { result: { error }, text };
 }
 
-export function createAgentTools(file: SourceFile, log: StepLog) {
+export function createAgentTools(
+  file: SourceFile,
+  log: StepLog,
+  /** Known suppliers, for identify_supplier (uploads only). */
+  suppliers: Supplier[] = [],
+) {
+  // An upload starts with no supplier; identify_supplier sets it, and every
+  // line saved afterwards uses it.
+  let supplierId = file.supplier_id;
   const lineOrRefuse = async (id: number): Promise<QuoteLine | null> =>
     getFileQuoteLine(id, file.id);
 
@@ -125,7 +135,7 @@ export function createAgentTools(file: SourceFile, log: StepLog) {
         logged(log, "save_quote_line", async () => {
           const line = await insertQuoteLine({
             sourceFileId: file.id,
-            supplierId: file.supplier_id,
+            supplierId,
             route: input.route,
             price: input.price,
             unitNote: input.unit_note,
@@ -338,5 +348,53 @@ export function createAgentTools(file: SourceFile, log: StepLog) {
           };
         }),
     }),
+    ...(file.is_upload && suppliers.length > 0
+      ? { identify_supplier: identifySupplierTool(file, log, suppliers, (id) => (supplierId = id)) }
+      : {}),
   };
+}
+
+const supplierNames = (suppliers: Supplier[]) =>
+  suppliers.map((s) => s.name) as [string, ...string[]];
+
+/** Uploads only: which known supplier sent this file, or none. */
+function identifySupplierTool(
+  file: SourceFile,
+  log: StepLog,
+  suppliers: Supplier[],
+  setSupplier: (id: number | null) => void,
+) {
+  return tool({
+    description:
+      "Uploaded files only. Say which of the known suppliers sent this file, from the names, email addresses, signatures or letterheads in it. Call this FIRST, before saving any line. Use null when the file doesn't show which known supplier sent it; never guess.",
+    inputSchema: z.object({
+      supplier: z
+        .enum(supplierNames(suppliers))
+        .nullable()
+        .describe("One of the known suppliers, or null if the file doesn't show it"),
+      sender_name: z
+        .string()
+        .nullable()
+        .describe("The person or company that sent it, as written in the file, or null"),
+      evidence: z.string().describe("The exact words in the file that show who sent it"),
+    }),
+    execute: (input) =>
+      logged(log, "identify_supplier", async () => {
+        const supplier = suppliers.find((s) => s.name === input.supplier) ?? null;
+        await setUploadSupplier(file.id, supplier?.id ?? null, input.sender_name?.trim() || null);
+        setSupplier(supplier?.id ?? null);
+        return supplier
+          ? {
+              result: { supplier: supplier.name },
+              text: `Sent by ${supplier.name} (${input.evidence.replace(/\s+/g, " ").trim().slice(0, 120)})`,
+            }
+          : {
+              result: {
+                supplier: null,
+                note: "Supplier unknown: save and sort every line, then flag the file once as unknown_sender.",
+              },
+              text: "Couldn't tell which supplier sent this file",
+            };
+      }),
+  });
 }

@@ -8,6 +8,7 @@ import {
   countFileResults,
   getSourceFile,
   listRules,
+  listSuppliers,
   setSourceFileStatus,
   type SourceFile,
 } from "@/lib/db";
@@ -70,10 +71,13 @@ export async function runAgent(
     const converted = convertFile(bytes, file.file_name, file.type, getProvider());
     log.record("read_file", `Opened ${displayFileName(file)} (${converted.description})`);
 
-    const rules = await listRules();
+    const [rules, suppliers] = await Promise.all([
+      listRules(),
+      file.is_upload ? listSuppliers() : Promise.resolve([]),
+    ]);
     const result = streamText({
       model: getModel(),
-      instructions: buildInstructions(file, rules),
+      instructions: buildInstructions(file, rules, suppliers),
       messages: [
         {
           role: "user",
@@ -83,7 +87,7 @@ export async function runAgent(
           ],
         },
       ],
-      tools: createAgentTools(file, log),
+      tools: createAgentTools(file, log, suppliers),
       stopWhen: isStepCount(MAX_MODEL_STEPS),
       abortSignal: options.signal,
     });

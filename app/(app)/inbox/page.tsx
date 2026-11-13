@@ -11,14 +11,22 @@ import {
   type SourceFileWithCount,
 } from "@/lib/db";
 import { readEmailSubject } from "@/lib/samples";
-import { InboxNotice, ProcessInboxButton } from "./InboxActions";
+import { AddQuotesButton, InboxNotice, ProcessInboxButton } from "./InboxActions";
 import { InboxView, type InboxFile, type InboxGroup } from "./InboxView";
 
 export default function InboxPage() {
   return (
     <>
-      {/* "Add quotes" is added in Step 6, checkpoint 2. */}
-      <PageHeader breadcrumb="Inbox" title="Inbox" actions={<ProcessInboxButton />} />
+      <PageHeader
+        breadcrumb="Inbox"
+        title="Inbox"
+        actions={
+          <>
+            <AddQuotesButton />
+            <ProcessInboxButton />
+          </>
+        }
+      />
       <InboxNotice />
       <Suspense fallback={<p className="m-0 text-sm text-slate">Loading the inbox…</p>}>
         <InboxData />
@@ -91,7 +99,9 @@ async function toTile(f: SourceFileWithCount): Promise<InboxFile> {
   const typeLabel =
     f.type === "spreadsheet"
       ? `Spreadsheet · ${ext === "csv" ? "CSV" : "Excel"}`
-      : typeLabels[f.type];
+      : f.type === "scan" && ["png", "jpg", "jpeg"].includes(ext ?? "")
+        ? "Photo"
+        : typeLabels[f.type];
   const sender = f.sender_name ?? "Unknown sender";
   return {
     id: f.id,

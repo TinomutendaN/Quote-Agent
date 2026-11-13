@@ -5,6 +5,7 @@ import {
   type DemoRun,
   claimDemoRun,
   claimHeldBackRun,
+  deleteStalledUploads,
   getDemoRun,
   resetStalledHeldBack,
   resetStuckFiles,
@@ -26,6 +27,8 @@ export type StartRunResult =
   | { started: false; state: DemoRun; message: string };
 
 export async function startDemoRun(): Promise<StartRunResult> {
+  // Same occasion as the stall check: clear uploads whose request was cut off.
+  await deleteStalledUploads(STALL_MINUTES);
   const runId = randomUUID();
   const claim = await claimDemoRun(runId, STALL_MINUTES);
 

@@ -1,4 +1,4 @@
-import { RunDriverProvider } from "@/components/RunDriver";
+import { RunDriverProvider, UploadBanner } from "@/components/RunDriver";
 import { Sidebar } from "@/components/Sidebar";
 
 // Shared layout for the five app pages: sidebar on the left (stacked on top
@@ -10,6 +10,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
       <div className="flex min-h-screen flex-wrap bg-page text-ink">
         <Sidebar />
         <main className="box-border flex min-w-0 flex-[999_1_640px] flex-col gap-[18px] px-4 pt-[22px] pb-10 sm:px-8">
+          <UploadBanner />
           {children}
         </main>
       </div>

@@ -5,12 +5,12 @@
 //
 // If a provider ever can't take a file type directly, handle it in this file
 // only, for that provider only (see `provider`).
-import type { FilePart, TextPart } from "ai";
+import type { FilePart, ImagePart, TextPart } from "ai";
 import * as XLSX from "xlsx";
 import type { Provider } from "@/lib/ai/model";
 import type { SourceFileType } from "@/lib/db";
 
-export type QuoteContent = Array<TextPart | FilePart>;
+export type QuoteContent = Array<TextPart | FilePart | ImagePart>;
 
 export type ConvertedFile = {
   content: QuoteContent;
@@ -73,13 +73,23 @@ export function convertFile(
     };
   }
 
-  // pdf or scan (a scan may also be a photo uploaded as an image)
+  // pdf or scan. An uploaded photo (PNG/JPG) is stored as a scan but goes
+  // to the model as an image part, not as a document.
   const mediaType = mediaTypeFor(fileName);
+  if (mediaType.startsWith("image/")) {
+    return {
+      content: [
+        { type: "text", text: `Photo of a quote "${fileName}":` },
+        { type: "image", image: bytes, mediaType },
+      ],
+      description: "photo",
+    };
+  }
   return {
     content: [
       { type: "text", text: `${label === "PDF" ? "PDF" : "Scanned"} file "${fileName}":` },
       { type: "file", mediaType, data: bytes, filename: fileName },
     ],
-    description: mediaType.startsWith("image/") ? "photo" : label,
+    description: label,
   };
 }

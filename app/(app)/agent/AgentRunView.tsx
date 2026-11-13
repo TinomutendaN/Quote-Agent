@@ -49,7 +49,7 @@ export function AgentRunView({ initial }: { initial: LiveSnapshot }) {
 
   // Keep up to date while anything is happening; stop when nothing is.
   const anyWorking = snap.files.some((f) => f.status === "working");
-  const shouldPoll = snap.run.status === "running" || anyWorking || driver.active;
+  const shouldPoll = snap.run.status === "running" || anyWorking || driver.active || driver.uploading;
   const runId = driver.runId;
   useEffect(() => {
     if (!shouldPoll) return;
@@ -71,12 +71,13 @@ export function AgentRunView({ initial }: { initial: LiveSnapshot }) {
     };
   }, [shouldPoll, runId]);
 
-  // One last read when this browser stops sending files.
-  const wasActive = useRef(driver.active);
+  // One last read when this browser stops sending files or uploading.
+  const busy = driver.active || driver.uploading;
+  const wasBusy = useRef(busy);
   useEffect(() => {
-    if (wasActive.current && !driver.active) fetchSnapshot(runId).then(setSnap).catch(() => {});
-    wasActive.current = driver.active;
-  }, [driver.active, runId]);
+    if (wasBusy.current && !busy) fetchSnapshot(runId).then(setSnap).catch(() => {});
+    wasBusy.current = busy;
+  }, [busy, runId]);
 
   const openReviews = snap.reviews.filter((r) => r.status === "open").length;
 

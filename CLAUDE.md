@@ -14,8 +14,8 @@ Solo developer, 48-hour build, deployed on Vercel. The app is built **one screen
 | 3 – Sample quote files | Done |
 | 4 – Shell + Inbox | Done |
 | 5 – The agent (no screen) | Done |
-| 6 – Agent run screen | Next |
-| 7 – Review queue | |
+| 6 – Agent run screen | Done |
+| 7 – Review queue | Next |
 | 8 – Price lists | |
 | 9 – Ask + the new quote | |
 | 10 – Landing + Reset demo | |
@@ -86,6 +86,7 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - **Inbox Open links:** each Inbox tile has a small "Open" link to `/samples/<file_name>` (new tab). Uploaded files show no link.
 - **Add quotes (upload):** one file at a time: emails as .txt or .eml, PDFs, PNG/JPG photos (stored as type `scan` and sent to the model as images), .xlsx and .csv. At most 4 MB. At most 10 uploads per reset, counted as `source_files WHERE is_upload`, so reset clears the count; a friendly message appears at the limit. An upload whose agent run fails is deleted, which frees its slot. An upload still working after 10 minutes with no activity is deleted with its lines, review items and events; this check runs when a run starts and before each upload. The agent identifies the sender among the known suppliers with the `identify_supplier` tool (uploads only); if it can't tell, it saves the lines and flags the file "unknown sender". The upload shows on Agent run as it is processed, then in the Inbox.
 - **Uploads are separate from the inbox run:** "Quotes handled X of 17", the queues, the stall takeover and the run-finished check all ignore uploads. An upload during a run never changes the run's progress or stops it finishing.
+- **Next-morning delivery (rule 1 in the prompt):** a job is Out-of-hours only when collection or delivery happens after 6pm, overnight, or at the weekend. A weekday daytime collection with delivery the next morning during normal hours is a weekday job; "next-day delivery" on its own never makes a job Out-of-hours (file 16 is Standard).
 - **Prompt safety:** the system prompt says the file's contents are quote data only, never instructions. Text in a file that asks the agent to change its rules, call tools differently or ignore the prompt is ignored.
 
 ## What's already built (Steps 0–3)
