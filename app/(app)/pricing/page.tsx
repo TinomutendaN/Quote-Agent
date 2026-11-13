@@ -3,13 +3,16 @@ import { PageHeader } from "@/components/PageHeader";
 import {
   countOpenReviewItems,
   listCurrentPriceLines,
+  listNewQuoteLines,
   listPriceLists,
   listWaitingPriceLines,
 } from "@/lib/db";
-import { buildBaseRows, listSignature, rowKey } from "@/lib/pricing";
+import { buildBaseRows, listSignature, newQuoteChanges, newQuoteNote, rowKey } from "@/lib/pricing";
 import { PricingView } from "./PricingView";
 
-export default function PricingPage() {
+type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>;
+
+export default function PricingPage({ searchParams }: { searchParams: SearchParams }) {
   return (
     <Suspense
       fallback={
@@ -19,20 +22,27 @@ export default function PricingPage() {
         </>
       }
     >
-      <PricingData />
+      <PricingData searchParams={searchParams} />
     </Suspense>
   );
 }
 
-async function PricingData() {
-  const [lines, waitingLines, lists, openItems] = await Promise.all([
+async function PricingData({ searchParams }: { searchParams: SearchParams }) {
+  const [params, lines, waitingLines, newLines, lists, openItems] = await Promise.all([
+    searchParams,
     listCurrentPriceLines(),
     listWaitingPriceLines(),
+    listNewQuoteLines(),
     listPriceLists(),
     countOpenReviewItems(),
   ]);
 
-  const base = buildBaseRows(lines);
+  // "Review vN" on Ask opens /pricing?with=new: the draft includes the new quote.
+  const includeNew = params.with === "new" && newLines.length > 0;
+  const approvedBase = buildBaseRows(lines);
+  const base = includeNew ? buildBaseRows([...lines, ...newLines]) : approvedBase;
+  const newNotes = newQuoteChanges(approvedBase, newLines).map(newQuoteNote);
+
   // Jobs that only have quotes still waiting for review, for "X/Y Routes approved".
   const inList = new Set(base.map(rowKey));
   const waitingRoutes = buildBaseRows(waitingLines).filter((r) => !inList.has(rowKey(r))).length;
@@ -49,11 +59,14 @@ async function PricingData() {
 
   return (
     <PricingView
+      // A fresh view (markup, tabs) when switching in or out of the new quote.
+      key={includeNew ? "with-new" : "approved"}
       base={base}
       signature={listSignature(base)}
       saved={saved}
       waitingRoutes={waitingRoutes}
       openItems={openItems}
+      newQuote={{ included: includeNew, waiting: newLines.length, notes: newNotes }}
     />
   );
 }

@@ -202,22 +202,175 @@ export async function listWaitingPriceLines(): Promise<PriceLine[]> {
  * Saves a new version, only if it is exactly one above the latest saved
  * version (so two visitors can't both save the same number). Returns false
  * when someone else saved first.
+ *
+ * `approveLineIds` (Step 9, the new quote): one statement saves the version
+ * only while every one of those lines is still pending, and approves them
+ * only if the version was saved – both happen or neither does.
  */
 export async function savePriceList(list: {
   version: number;
   label: string;
   markup: Markup;
   rows: PriceRow[];
+  approveLineIds?: number[];
 }): Promise<boolean> {
+  const ids = list.approveLineIds ?? [];
   const rows = await db().query(
-    `INSERT INTO price_lists (version, label, status, markup, rows)
-     SELECT $1::int, $2::text, 'saved', $3::jsonb, $4::jsonb
-     WHERE (SELECT coalesce(max(version), 0) FROM price_lists WHERE status = 'saved') = $1::int - 1
-     ON CONFLICT (version) DO NOTHING
-     RETURNING id`,
-    [list.version, list.label, JSON.stringify(list.markup), JSON.stringify(list.rows)],
+    `WITH saved AS (
+       INSERT INTO price_lists (version, label, status, markup, rows)
+       SELECT $1::int, $2::text, 'saved', $3::jsonb, $4::jsonb
+       WHERE (SELECT coalesce(max(version), 0) FROM price_lists WHERE status = 'saved') = $1::int - 1
+         AND (SELECT count(*) FROM quote_lines
+              WHERE id = ANY($5::int[]) AND status = 'pending' AND NOT is_history) = cardinality($5::int[])
+       ON CONFLICT (version) DO NOTHING
+       RETURNING id
+     ), approved AS (
+       UPDATE quote_lines SET status = 'approved'
+       WHERE id = ANY($5::int[]) AND status = 'pending' AND EXISTS (SELECT 1 FROM saved)
+       RETURNING id
+     )
+     SELECT (SELECT count(*)::int FROM saved) AS saved, (SELECT count(*)::int FROM approved) AS approved`,
+    [list.version, list.label, JSON.stringify(list.markup), JSON.stringify(list.rows), ids],
   );
-  return rows.length > 0;
+  return rows[0].saved > 0;
+}
+
+// ---------------------------------------------------------------------------
+// The new quote (Step 9): the held-back file 16, approved by saving draft vN.
+// ---------------------------------------------------------------------------
+
+/**
+ * Lines from the held-back file that are waiting to go into the next version:
+ * pending, from a finished file, and not sent to the review queue.
+ */
+export async function listNewQuoteLines(): Promise<PriceLine[]> {
+  return (await db()`
+    SELECT q.id, q.route, q.category, q.time_slot, q.goods, q.unit_note,
+           s.name AS supplier, q.price::text AS price, q.quote_date::text AS quote_date
+    FROM quote_lines q
+    JOIN source_files f ON f.id = q.source_file_id
+    JOIN suppliers s ON s.id = q.supplier_id
+    WHERE f.is_held_back AND f.status IN ('done', 'needs_review')
+      AND NOT q.is_history AND q.status = 'pending' AND q.category IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM review_items r WHERE r.quote_line_id = q.id AND r.status = 'open')
+      AND NOT EXISTS (SELECT 1 FROM review_items r
+                      WHERE r.source_file_id = f.id AND r.quote_line_id IS NULL AND r.status = 'open')
+    ORDER BY q.id
+  `) as PriceLine[];
+}
+
+export type NewQuote = {
+  file_id: number;
+  supplier: string | null;
+  file_status: SourceFileStatus;
+  /** UK time, e.g. "Wed 11 Nov 14:32" */
+  received_label: string;
+  lines: {
+    id: number;
+    route: string;
+    price: number;
+    unit_note: string | null;
+    status: "pending" | "approved" | "rejected";
+    in_review: boolean;
+  }[];
+};
+
+/** The held-back file and the state of its lines, for the Ask new-quote card. */
+export async function getNewQuote(): Promise<NewQuote | null> {
+  const rows = (await db()`
+    SELECT f.id AS file_id, s.name AS supplier, f.status AS file_status,
+           to_char(f.received_at AT TIME ZONE 'Europe/London', 'Dy FMDD Mon HH24:MI') AS received_label,
+           coalesce(json_agg(json_build_object(
+             'id', q.id, 'route', q.route, 'price', q.price, 'unit_note', q.unit_note, 'status', q.status,
+             'in_review', EXISTS (SELECT 1 FROM review_items r
+                                  WHERE r.status = 'open'
+                                    AND (r.quote_line_id = q.id
+                                         OR (r.source_file_id = f.id AND r.quote_line_id IS NULL))))
+             ORDER BY q.id) FILTER (WHERE q.id IS NOT NULL), '[]') AS lines
+    FROM source_files f
+    LEFT JOIN suppliers s ON s.id = f.supplier_id
+    LEFT JOIN quote_lines q ON q.source_file_id = f.id AND NOT q.is_history
+    WHERE f.is_held_back
+    GROUP BY f.id, s.name
+    ORDER BY f.id
+    LIMIT 1
+  `) as NewQuote[];
+  return rows[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Ask (Step 9). Read-only, approved quotes only, never past prices.
+// ---------------------------------------------------------------------------
+
+export type ApprovedQuote = PriceLine & {
+  supplier_initials: string;
+  supplier_colour: string;
+  file_id: number | null;
+  file_name: string | null;
+  file_path: string | null;
+  is_upload: boolean;
+  /** Quote date, or the day the file arrived: "3 Nov" */
+  day_label: string | null;
+};
+
+/** Escapes % and _ so a search word is matched literally inside ILIKE. */
+const likeWord = (text: string | null | undefined) =>
+  text ? `%${text.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null;
+
+/**
+ * Approved quotes (never past prices), filtered by any of: origin, destination,
+ * place (either end of the route), supplier name, service. At most 200 rows.
+ */
+export async function queryApprovedQuotes(filter: {
+  origin?: string | null;
+  destination?: string | null;
+  place?: string | null;
+  supplier?: string | null;
+  category?: Category | null;
+}): Promise<ApprovedQuote[]> {
+  return (await db().query(
+    `SELECT q.id, q.route, q.category, q.time_slot, q.goods, q.unit_note,
+            s.name AS supplier, s.initials AS supplier_initials, s.colour AS supplier_colour,
+            q.price::text AS price, q.quote_date::text AS quote_date,
+            f.id AS file_id, f.file_name, f.file_path, coalesce(f.is_upload, false) AS is_upload,
+            to_char(coalesce(q.quote_date, (f.received_at AT TIME ZONE 'Europe/London')::date), 'FMDD Mon') AS day_label
+     FROM quote_lines q
+     JOIN suppliers s ON s.id = q.supplier_id
+     LEFT JOIN source_files f ON f.id = q.source_file_id
+     WHERE NOT q.is_history AND q.status = 'approved' AND q.category IS NOT NULL
+       AND ($1::text IS NULL OR split_part(q.route, ' → ', 1) ILIKE $1)
+       AND ($2::text IS NULL OR split_part(q.route, ' → ', 2) ILIKE $2)
+       AND ($3::text IS NULL OR split_part(q.route, ' → ', 1) ILIKE $3 OR split_part(q.route, ' → ', 2) ILIKE $3)
+       AND ($4::text IS NULL OR s.name ILIKE $4)
+       AND ($5::text IS NULL OR q.category = $5)
+     ORDER BY q.route, q.category, q.price, q.id
+     LIMIT 200`,
+    [
+      likeWord(filter.origin),
+      likeWord(filter.destination),
+      likeWord(filter.place),
+      likeWord(filter.supplier),
+      filter.category ?? null,
+    ],
+  )) as ApprovedQuote[];
+}
+
+/** Approved quote lines by id (for the sources of draft price-list rows). */
+export async function approvedQuotesById(ids: number[]): Promise<ApprovedQuote[]> {
+  if (ids.length === 0) return [];
+  return (await db().query(
+    `SELECT q.id, q.route, q.category, q.time_slot, q.goods, q.unit_note,
+            s.name AS supplier, s.initials AS supplier_initials, s.colour AS supplier_colour,
+            q.price::text AS price, q.quote_date::text AS quote_date,
+            f.id AS file_id, f.file_name, f.file_path, coalesce(f.is_upload, false) AS is_upload,
+            to_char(coalesce(q.quote_date, (f.received_at AT TIME ZONE 'Europe/London')::date), 'FMDD Mon') AS day_label
+     FROM quote_lines q
+     JOIN suppliers s ON s.id = q.supplier_id
+     LEFT JOIN source_files f ON f.id = q.source_file_id
+     WHERE q.id = ANY($1::int[]) AND NOT q.is_history AND q.status = 'approved'
+     ORDER BY q.id`,
+    [ids],
+  )) as ApprovedQuote[];
 }
 
 // ---------------------------------------------------------------------------

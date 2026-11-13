@@ -84,6 +84,14 @@ function compareRows(a: BaseRow, b: BaseRow): number {
  * Ties go to the most recent quote, then the earliest saved line.
  */
 export function buildBaseRows(lines: PriceLine[]): BaseRow[] {
+  return buildBaseRowsWithSources(lines).rows;
+}
+
+/** Same as buildBaseRows, plus the quote line chosen for each row (by rowKey). */
+export function buildBaseRowsWithSources(lines: PriceLine[]): {
+  rows: BaseRow[];
+  sourceIds: Map<string, number>;
+} {
   const best = new Map<string, { line: PriceLine; row: BaseRow }>();
   for (const line of lines) {
     const row: BaseRow = {
@@ -105,7 +113,50 @@ export function buildBaseRows(lines: PriceLine[]): BaseRow[] {
           ((line.quote_date ?? "") === (current.line.quote_date ?? "") && line.id < current.line.id)));
     if (better) best.set(key, { line, row });
   }
-  return [...best.values()].map((b) => b.row).sort(compareRows);
+  return {
+    rows: [...best.values()].map((b) => b.row).sort(compareRows),
+    sourceIds: new Map([...best].map(([key, b]) => [key, b.line.id])),
+  };
+}
+
+/** Typical cost: the average, rounded to the nearest whole pound (£282.50 → £283). */
+export function typicalCost(prices: (string | number)[]): number {
+  if (prices.length === 0) return 0;
+  const pence = prices.reduce<number>((sum, p) => sum + toPence(p), 0);
+  return Math.round(pence / prices.length / 100);
+}
+
+/** What one new quote line would do to the current list. */
+export type NewQuoteChange = {
+  row: BaseRow;
+  /** The current cheapest row for the same job, if there is one. */
+  current: BaseRow | null;
+  /** Whole-number % the new quote is below (positive) or above (negative) the current one. */
+  cheaperPct: number | null;
+  /** True when the new quote becomes the cheapest for its job. */
+  wins: boolean;
+};
+
+/** Compares new quote lines with the current (approved-only) rows. */
+export function newQuoteChanges(base: BaseRow[], newLines: PriceLine[]): NewQuoteChange[] {
+  const byKey = new Map(base.map((r) => [rowKey(r), r]));
+  return buildBaseRows(newLines).map((row) => {
+    const current = byKey.get(rowKey(row)) ?? null;
+    if (!current) return { row, current, cheaperPct: null, wins: true };
+    const pct = ((toPence(current.cost) - toPence(row.cost)) / toPence(current.cost)) * 100;
+    return { row, current, cheaperPct: Math.round(pct), wins: toPence(row.cost) < toPence(current.cost) };
+  });
+}
+
+/** "London → Manchester: M6 Express £270, was Swift Haul £295" */
+export function newQuoteNote(c: NewQuoteChange): string {
+  const job = c.row.category === "Standard" && c.row.time_slot === "weekday" && c.row.goods === "general"
+    ? c.row.route
+    : `${c.row.route} (${serviceLabel(c.row)})`;
+  const now = `${c.row.supplier} ${priceLabel(c.row.cost, c.row.unit)}`;
+  if (!c.current) return `${job}: ${now}, a new route for the list`;
+  const was = `${c.current.supplier} ${priceLabel(c.current.cost, c.current.unit)}`;
+  return c.wins ? `${job}: ${now}, was ${was}` : `${job}: ${now} – ${was} stays the cheapest`;
 }
 
 /** Standard markup plus the fixed extras: 25 → {25, 35, 40}. */

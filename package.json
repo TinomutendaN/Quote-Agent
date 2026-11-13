@@ -11,7 +11,8 @@
     "db:processed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/db-setup.mjs --processed",
     "db:export-processed": "node scripts/export-fixture.mjs",
     "agent:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/agent-test.mjs",
-    "pricing:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/pricing-check.mjs"
+    "pricing:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/pricing-check.mjs",
+    "ask:test": "node scripts/ask-test.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.102",

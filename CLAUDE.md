@@ -17,8 +17,8 @@ Solo developer, 48-hour build, deployed on Vercel. The app is built **one screen
 | 6 – Agent run screen | Done |
 | 7 – Review queue | Done |
 | 8 – Price lists | Done |
-| 9 – Ask + the new quote | Next |
-| 10 – Landing + Reset demo | |
+| 9 – Ask + the new quote | Done |
+| 10 – Landing + Reset demo | Next |
 | 11 – Full testing | |
 | 12 – Demo video | |
 
@@ -115,6 +115,15 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - **Money** is stored to the penny and worked out in whole pence. It is shown without pence when it's whole pounds (£206, £206.25, £206.50). `formatMoney` in `lib/pricing.ts`; the Review queue uses the same rule.
 - **Export PDF** is the browser's print (Save as PDF). The sidebar, buttons, tabs, markup chips and the card's left panel are hidden in print, and the table prints in full with its header row on every page. It prints whichever list (Customer or Internal, draft or saved) is on screen.
 - **Testing:** `npm run db:processed` then `npm run pricing:check` checks the maths against hand calculations, v1 vs v2, and the draft list (expected numbers for both "4 items open" and "all 4 approved"). No model calls.
+
+**Ask + new quote (Step 9)**
+- **The new quote waits until "Review vN":** file 16's line stays pending and outside the draft until the visitor presses the Review button on the Ask new-quote card. That opens Price lists at `/pricing?with=new`, showing the next draft (latest saved + 1) with the new quote included and a note naming the change (e.g. "London → Manchester: M6 Express £270, was Swift Haul £295"), plus a "Leave it out" link. Saving that draft approves the new quote in the same atomic statement (`savePriceList` with `approveLineIds`: the version is inserted only while those lines are still pending, and they're approved only if the insert happened). The button label uses the real version number (v4 if v3 is saved, v3 if not). Until then, Price lists shows "1 new quote is waiting" with a link to review it. The "8% cheaper" figure is worked out in code (`newQuoteChanges` in `lib/pricing.ts`, rounded), never by the model.
+- **New-quote card states:** hidden until file 16 has lines; "waiting for your approval" with REVIEW VN while pending; "Approved – now in the price list" once saved; "Sent to the review queue" if the agent flagged it. "Arrived" shows the real received day and time.
+- **Ask answers only from data:** three read-only tools (`query_approved_quotes`, `get_price_list`, `compare_versions` in `lib/ask/tools.ts`), all excluding past prices. Money in tool results is pre-formatted with `formatMoney`; typical cost (average rounded to the nearest pound, `typicalCost`), cheapest, totals and margins are all worked out in code. The model must never state a price it didn't get from a tool. "Quotes used" under each answer is built from the tool results' `sources` by our code, not from the model's text. Each row has an Open link to its original file (none for uploads). Saved versions are snapshots, so they're listed as "From price lists: …" rather than matched to quotes.
+- **What each suggested question uses:** "Which supplier is cheapest for Leeds?" – approved quotes for routes starting or ending in Leeds, compared per route and service. "What changed since v2?" – v2 compared with the latest saved version, or the current draft if nothing newer is saved; the answer says which. "Our margin on Specialist jobs?" – the current draft at the default 25% markup, unless a version is named; the answer says which. The "current" list in Ask never includes the waiting new quote. When the current draft (at 25%) is identical to the latest saved version, Ask and its tool results call it "saved vN (no changes since)", never "vN+1 draft"; it's only a draft when it differs.
+- **Version labels:** a save that includes the new quote is labelled after it automatically ("M6 Express update", the supplier names joined with "and"); every other save keeps the date label ("Saved 13 Nov, 14:05"). London → Manchester typical cost is £295 (1 quote) before the new quote is approved and £283 (from £295 and £270) after.
+- **Focused and cheap:** questions about this demo's quotes, prices and versions only; anything else gets "I can only answer questions about these quotes and price lists." Questions are at most 300 characters, at most 6 tool steps per answer (the 7th step has tools off so it always answers), answers stream in. Only the last 4 turns are sent to the model, text only. Chat history lives only in the visitor's browser tab (`sessionStorage`).
+- **Testing:** at most about 15 questions across all testing, with `npm run db:processed` plus the review actions (no agent runs). `npm run ask:test -- "question"` (dev server running) prints tool calls, the answer, Quotes used, a check that every £ figure in the answer appears in a tool result, and the cost.
 
 ## What's already built (Steps 0–3)
 

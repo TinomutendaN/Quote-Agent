@@ -13,13 +13,17 @@ import {
   buildBaseRows,
   compareVersions,
   formatMoney,
+  listSignature,
   markupFor,
+  newQuoteChanges,
+  newQuoteNote,
   priceLabel,
   priceRow,
   priceRows,
   sameList,
   serviceLabel,
   totals,
+  typicalCost,
 } from "../lib/pricing.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -105,6 +109,14 @@ const expected = {
   before: { rows: 119, split: [79, 22, 18], cost: 21089, sells: [25187.85, 27296.75, 29405.65], added: 104, satLM: 340 },
   after: { rows: 126, split: [86, 22, 18], cost: 21894, sells: [26111.6, 28301, 30490.4], added: 111, satLM: 320 },
 }[state];
+// Once the new quote is approved (by saving vN from "Review vN"), M6's £270
+// replaces Swift Haul's £295 for weekday London → Manchester.
+const m6Approved = (await db.listNewQuoteLines()).length === 0;
+if (expected && m6Approved) {
+  expected.cost -= 25;
+  expected.sells = expected.sells.map((s, i) => Math.round((s - [28.75, 31.25, 33.75][i]) * 100) / 100);
+}
+const lmExpected = m6Approved ? ["M6 Express", 270] : ["Swift Haul Ltd", 295];
 if (!expected) {
   console.log("     Skipped: run npm run db:processed (4 open items) or approve all 4 items first.");
 } else {
@@ -120,18 +132,38 @@ if (!expected) {
     check(`${m}%: margin = Σ cost × category markup (±1p per row)`, Math.abs(t.margin - margin) <= rows.length * 0.01, true);
   });
   const lm = base.find((r) => r.route === "London → Manchester" && r.category === "Standard");
-  check("London → Manchester weekday: Swift Haul £295 (M6's £270 waits for v4)", [lm.supplier, lm.cost], ["Swift Haul Ltd", 295]);
+  check(`London → Manchester weekday: ${lmExpected.join(" £")}`, [lm.supplier, lm.cost], lmExpected);
   const sat = base.find((r) => r.route === "London → Manchester" && r.time_slot === "weekend");
   check("Saturday London → Manchester", sat.cost, expected.satLM);
   const v2v3 = compareVersions(v2.rows, priceRows(base, markupFor(25)));
   check("v2 → v3 at 25%: added / removed / changed", [v2v3.added.length, v2v3.removed.length, v2v3.changed.length], [expected.added, 0, 15]);
 }
 
+// ---------------------------------------------------------------------------
+console.log("\n4. The new quote (file 16) and Ask figures");
+check("typical cost rounds to the pound", [typicalCost([295, 270]), typicalCost(["295.00"]), typicalCost(["100.00", "101.00"])], [283, 295, 101]);
 const files = await db.listSourceFiles();
 const held = files.find((f) => f.is_held_back);
-const heldLines = (await db.listCurrentPriceLines()).filter((l) => l.route === "London → Manchester" && l.supplier === "M6 Express" && Number(l.price) === 270);
-check("file 16's £270 line is not approved", heldLines.length, 0);
 check("file 16 finished", held.status, "done");
+const current = await db.listCurrentPriceLines();
+const newLines = await db.listNewQuoteLines();
+const approvedM6 = current.filter((l) => l.route === "London → Manchester" && l.supplier === "M6 Express" && Number(l.price) === 270);
+if (newLines.length > 0) {
+  check("file 16's £270 line is waiting, not approved", [newLines.length, approvedM6.length], [1, 0]);
+  const approvedBase = buildBaseRows(current);
+  const [change] = newQuoteChanges(approvedBase, newLines);
+  check("new quote vs current list", [change.current?.supplier, change.current?.cost, change.row.cost, change.cheaperPct, change.wins],
+    ["Swift Haul Ltd", 295, 270, 8, true]);
+  check("new quote note", newQuoteNote(change), "London → Manchester: M6 Express £270, was Swift Haul Ltd £295");
+  const withNew = buildBaseRows([...current, ...newLines]);
+  const lm = withNew.find((r) => r.route === "London → Manchester" && r.category === "Standard");
+  check("draft with the new quote: same rows, London → Manchester M6 £270", [withNew.length, lm.supplier, lm.cost], [approvedBase.length, "M6 Express", 270]);
+  check("signature changes with the new quote", listSignature(withNew) !== listSignature(approvedBase), true);
+} else {
+  check("file 16's £270 line was approved by saving a version", approvedM6.length, 1);
+  const withM6 = lists.filter((l) => l.rows.some((r) => r.route === "London → Manchester" && r.supplier === "M6 Express" && r.cost === 270));
+  check("the version that added M6 Express £270 is labelled after it", withM6.at(-1)?.label, "M6 Express update");
+}
 
 console.log(failures === 0 ? "\nAll price list checks passed." : `\n${failures} check(s) failed.`);
 process.exitCode = failures === 0 ? 0 : 1;

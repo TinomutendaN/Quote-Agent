@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { DashedPill, PanelDivider, PanelFact, StatusBox, StatusCard } from "@/components/Cards";
 import { HeaderButton, PageHeader } from "@/components/PageHeader";
 import { CardTabs, PageTabs } from "@/components/Tabs";
@@ -37,6 +37,19 @@ type PageTab = "current" | "versions" | "compare";
 type ListTab = "customer" | "internal";
 type Notice = { text: string; tone: "ok" | "warn" };
 
+/** The new quote (held-back file 16) – see "Ask + new quote" in CLAUDE.md. */
+export type NewQuoteInfo = {
+  /** True when the draft includes it (/pricing?with=new). */
+  included: boolean;
+  /** Lines waiting to be approved by saving the next version. */
+  waiting: number;
+  /** "London → Manchester: M6 Express £270, was Swift Haul £295" */
+  notes: string[];
+};
+
+/** Carries the "Saved vN" message across the switch from ?with=new back to /pricing. */
+const NOTICE_KEY = "pricing-notice";
+
 const COMPANY = "Northline Couriers";
 
 export function PricingView({
@@ -45,6 +58,7 @@ export function PricingView({
   saved,
   waitingRoutes,
   openItems,
+  newQuote,
 }: {
   base: BaseRow[];
   signature: string;
@@ -52,6 +66,7 @@ export function PricingView({
   saved: SavedVersion[];
   waitingRoutes: number;
   openItems: number;
+  newQuote: NewQuoteInfo;
 }) {
   const router = useRouter();
   const [pageTab, setPageTab] = useState<PageTab>("current");
@@ -61,6 +76,18 @@ export function PricingView({
   const [viewing, setViewing] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Show the message saved just before switching back from ?with=new.
+  useEffect(() => {
+    try {
+      const text = sessionStorage.getItem(NOTICE_KEY);
+      if (text) {
+        sessionStorage.removeItem(NOTICE_KEY);
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-off read of browser storage
+        setNotice({ text, tone: "ok" });
+      }
+    } catch {}
+  }, []);
 
   const latest = saved[0] ?? null;
   const draftVersion = (latest?.version ?? 0) + 1;
@@ -85,13 +112,27 @@ export function PricingView({
       const res = await fetch("/api/pricing", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version: draftVersion, standard_markup: standard, signature }),
+        body: JSON.stringify({
+          version: draftVersion,
+          standard_markup: standard,
+          signature,
+          include_new: newQuote.included,
+        }),
       });
       const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
       if (res.ok) {
-        setNotice({ text: body.message ?? `Saved v${draftVersion}.`, tone: "ok" });
+        const text = body.message ?? `Saved v${draftVersion}.`;
+        setNotice({ text, tone: "ok" });
         setViewing(null);
-        router.refresh();
+        if (newQuote.included) {
+          // The new quote is approved now, so the plain list includes it.
+          try {
+            sessionStorage.setItem(NOTICE_KEY, text);
+          } catch {}
+          router.replace("/pricing");
+        } else {
+          router.refresh();
+        }
       } else {
         setNotice({ text: body.error ?? "Something went wrong saving the price list – try again.", tone: "warn" });
         if (res.status === 409) router.refresh();
@@ -162,6 +203,7 @@ export function PricingView({
           openVersion={openVersion}
           waitingRoutes={waitingRoutes}
           openItems={openItems}
+          newQuote={newQuote}
         />
       )}
 
@@ -205,6 +247,7 @@ function CurrentList({
   openVersion,
   waitingRoutes,
   openItems,
+  newQuote,
 }: {
   shown: { version: number; rows: PriceRow[]; markup: Markup; draft: boolean };
   draftVersion: number;
@@ -216,6 +259,7 @@ function CurrentList({
   openVersion: (v: number | null) => void;
   waitingRoutes: number;
   openItems: number;
+  newQuote: NewQuoteInfo;
 }) {
   const t = totals(shown.rows);
   const empty = shown.rows.length === 0;
@@ -282,6 +326,33 @@ function CurrentList({
           ]}
         />
       </div>
+
+      {shown.draft && newQuote.included && (
+        <div className="print:hidden">
+          <DashedPill>
+            <span>
+              Includes the new {newQuote.waiting === 1 ? "quote" : "quotes"} – {newQuote.notes.join("; ")}. Saving
+              v{shown.version} approves {newQuote.waiting === 1 ? "it" : "them"}.{" "}
+              <Link href="/pricing" className="font-semibold">
+                Leave it out
+              </Link>
+            </span>
+          </DashedPill>
+        </div>
+      )}
+
+      {shown.draft && !newQuote.included && newQuote.waiting > 0 && (
+        <div className="print:hidden">
+          <DashedPill tone="warn">
+            <span>
+              {newQuote.waiting} new {newQuote.waiting === 1 ? "quote is" : "quotes are"} waiting.{" "}
+              <Link href="/pricing?with=new" className="font-semibold">
+                Review {newQuote.waiting === 1 ? "it" : "them"}
+              </Link>
+            </span>
+          </DashedPill>
+        </div>
+      )}
 
       {shown.draft && openItems > 0 && (
         <div className="print:hidden">
