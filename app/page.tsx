@@ -33,7 +33,7 @@ export default function LandingPage() {
               Turn messy supplier quotes into clean price lists in minutes.
             </h1>
             <p className="m-0 text-lg leading-[1.55] text-slate">
-              Forward emails, PDFs and spreadsheets. The agent reads them, sorts every job using your
+              Emails, PDFs and spreadsheets. The agent reads them, sorts every job using your
               rules, stops to ask about anything odd, then builds your customer and internal price
               lists.
             </p>
@@ -64,9 +64,6 @@ export default function LandingPage() {
                 >
                   <PlayTriangle />
                   TUTORIAL VIDEO
-                  <span className="rounded-[4px] bg-pill px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.04em]">
-                    SOON
-                  </span>
                 </span>
               )}
             </div>
