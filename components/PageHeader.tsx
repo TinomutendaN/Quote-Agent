@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { HistoryArrows } from "./HistoryArrows";
 
@@ -38,29 +39,47 @@ export function PageHeader({
   );
 }
 
+const headerButtonClass = (primary: boolean) =>
+  `inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-btn px-4 text-[13px] font-semibold tracking-[0.03em] no-underline disabled:cursor-wait disabled:opacity-70 ${
+    primary
+      ? "border border-primary bg-primary text-white hover:bg-primary-hover hover:text-white"
+      : "border border-line-strong bg-white text-ink hover:bg-well hover:text-ink"
+  }`;
+
 /** Uppercase header button. `primary` is the solid blue one. */
 export function HeaderButton({
   children,
   primary = false,
   onClick,
   type = "button",
+  disabled = false,
 }: {
   children: ReactNode;
   primary?: boolean;
   onClick?: () => void;
   type?: "button" | "submit";
+  disabled?: boolean;
 }) {
   return (
-    <button
-      type={type}
-      onClick={onClick}
-      className={`inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-btn px-4 text-[13px] font-semibold tracking-[0.03em] ${
-        primary
-          ? "border border-primary bg-primary text-white hover:bg-primary-hover"
-          : "border border-line-strong bg-white text-ink hover:bg-well"
-      }`}
-    >
+    <button type={type} onClick={onClick} disabled={disabled} className={headerButtonClass(primary)}>
       {children}
     </button>
+  );
+}
+
+/** Header button that is a link to another page (e.g. Open review queue). */
+export function HeaderLink({
+  children,
+  href,
+  primary = false,
+}: {
+  children: ReactNode;
+  href: string;
+  primary?: boolean;
+}) {
+  return (
+    <Link href={href} className={headerButtonClass(primary)}>
+      {children}
+    </Link>
   );
 }

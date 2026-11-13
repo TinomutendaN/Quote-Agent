@@ -26,6 +26,9 @@ export type InboxFile = {
   sender: string;
   initials: string;
   status: SourceFileStatus;
+  linesFound: number;
+  /** The original sample file, or null for uploads (not kept). */
+  href: string | null;
 };
 
 export type InboxGroup = {
@@ -56,12 +59,12 @@ const fileIcons: Record<SourceFileType, IconName> = {
   spreadsheet: "sheet",
 };
 
-const fileNotes: Record<SourceFileStatus, string> = {
-  waiting: "Not processed yet",
-  working: "Being read",
-  done: "Done",
-  needs_review: "Needs you",
-};
+function fileNote(f: InboxFile): string {
+  if (f.status === "waiting") return "Not processed yet";
+  if (f.status === "working") return "Being read";
+  const found = `${f.linesFound} ${f.linesFound === 1 ? "price" : "prices"} found`;
+  return f.status === "needs_review" ? `${found} · needs you` : found;
+}
 
 export function InboxView({ groups, rules }: { groups: InboxGroup[]; rules: Rule[] }) {
   const [tab, setTab] = useState<TypeTab>("all");
@@ -86,7 +89,10 @@ export function InboxView({ groups, rules }: { groups: InboxGroup[]; rules: Rule
           { key: "spreadsheet", label: `SPREADSHEETS (${count("spreadsheet")})`, icon: "sheet" },
         ]}
       />
-      <p className="m-0 text-sm text-slate">Grouped by supplier, in the order they arrived.</p>
+      <p className="m-0 text-sm text-slate">
+        Grouped by supplier, in the order they arrived. Press Process inbox and the agent works
+        through all of them.
+      </p>
 
       {visible.map((g) => (
         <SupplierCard key={g.key} group={g} />
@@ -176,9 +182,22 @@ function FileTile({ file, colour }: { file: InboxFile; colour: string }) {
         <InitialsCircle initials={file.initials} colour={colour} />
         {file.sender}
       </div>
-      <span className="text-xs font-medium tracking-[0.03em] text-muted uppercase">
-        {fileNotes[file.status]}
-      </span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium tracking-[0.03em] text-muted uppercase">
+          {fileNote(file)}
+        </span>
+        {file.href && (
+          <a
+            href={file.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-semibold"
+            aria-label={`Open ${file.title} in a new tab`}
+          >
+            Open
+          </a>
+        )}
+      </div>
     </PillTile>
   );
 }

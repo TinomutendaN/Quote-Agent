@@ -11,6 +11,7 @@ import {
   setSourceFileStatus,
   type SourceFile,
 } from "@/lib/db";
+import { displayFileName } from "@/lib/fileNames";
 import { convertFile } from "./convert";
 import type { AgentEvent } from "./events";
 import { buildInstructions } from "./prompt";
@@ -67,7 +68,7 @@ export async function runAgent(
     const log = new StepLog(file, emit);
     const bytes = options.bytes ?? (await loadSampleBytes(file));
     const converted = convertFile(bytes, file.file_name, file.type, getProvider());
-    log.record("read_file", `Opened ${file.file_name} (${converted.description})`);
+    log.record("read_file", `Opened ${displayFileName(file)} (${converted.description})`);
 
     const rules = await listRules();
     const result = streamText({

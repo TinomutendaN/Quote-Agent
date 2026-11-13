@@ -94,18 +94,25 @@ export async function listRules(): Promise<Rule[]> {
   `) as Rule[];
 }
 
-/** All source files with their supplier name, oldest first. */
-export async function listSourceFiles(): Promise<SourceFile[]> {
+export type SourceFileWithCount = SourceFile & {
+  /** Prices saved from this file (never past prices). */
+  lines_found: number;
+};
+
+/** All source files with their supplier name and saved-price count, oldest first. */
+export async function listSourceFiles(): Promise<SourceFileWithCount[]> {
   return (await db()`
     SELECT f.id, f.supplier_id, s.name AS supplier_name, f.sender_name,
            f.file_name, f.file_path, f.type, f.received_at::text AS received_at,
            to_char(f.received_at AT TIME ZONE 'Europe/London', 'HH24:MI') AS received_time,
            to_char(f.received_at AT TIME ZONE 'Europe/London', 'Dy FMDD Mon') AS received_day,
-           f.is_held_back, f.is_upload, f.status
+           f.is_held_back, f.is_upload, f.status,
+           (SELECT count(*)::int FROM quote_lines q
+             WHERE q.source_file_id = f.id AND NOT q.is_history) AS lines_found
     FROM source_files f
     LEFT JOIN suppliers s ON s.id = f.supplier_id
     ORDER BY f.received_at, f.id
-  `) as SourceFile[];
+  `) as SourceFileWithCount[];
 }
 
 export type HistoryLine = {
@@ -518,12 +525,54 @@ export async function demoRunStatusFor(runId: string): Promise<DemoRunStatus | n
   return (rows[0]?.status as DemoRunStatus | undefined) ?? null;
 }
 
-/** Marks the owner's run as active now (keeps it from counting as stalled). */
+/**
+ * Marks the owner's run as active now (keeps it from counting as stalled).
+ * Also after the run has finished, while file 16 is being processed.
+ */
 export async function touchDemoRun(runId: string): Promise<void> {
   await db()`
     UPDATE demo_run SET last_activity_at = now()
-    WHERE id = 1 AND run_id = ${runId}::uuid AND status = 'running'
+    WHERE id = 1 AND run_id = ${runId}::uuid AND status IN ('running', 'finished')
   `;
+}
+
+/**
+ * Finished run, file 16 left stuck as working (its request was cut off) and
+ * no activity for `stallMinutes`: put it back to waiting and drop its
+ * partial lines and review items (events kept).
+ */
+export async function resetStalledHeldBack(stallMinutes: number): Promise<void> {
+  await db().transaction((tx) => [
+    tx`DELETE FROM review_items
+       WHERE source_file_id IN (
+         SELECT f.id FROM source_files f, demo_run r
+         WHERE r.id = 1 AND r.status = 'finished' AND f.is_held_back AND f.status = 'working'
+           AND r.last_activity_at < now() - make_interval(mins => ${stallMinutes}::int))`,
+    tx`DELETE FROM quote_lines
+       WHERE NOT is_history AND source_file_id IN (
+         SELECT f.id FROM source_files f, demo_run r
+         WHERE r.id = 1 AND r.status = 'finished' AND f.is_held_back AND f.status = 'working'
+           AND r.last_activity_at < now() - make_interval(mins => ${stallMinutes}::int))`,
+    tx`UPDATE source_files f SET status = 'waiting'
+       FROM demo_run r
+       WHERE r.id = 1 AND r.status = 'finished' AND f.is_held_back AND f.status = 'working'
+         AND r.last_activity_at < now() - make_interval(mins => ${stallMinutes}::int)`,
+  ]);
+}
+
+/**
+ * Finished run but the held-back file (16) is still waiting: hand out a new
+ * run token so this caller can process just that file. claimSourceFile still
+ * makes sure the file is processed only once.
+ */
+export async function claimHeldBackRun(runId: string): Promise<boolean> {
+  const rows = await db()`
+    UPDATE demo_run SET run_id = ${runId}::uuid, last_activity_at = now()
+    WHERE id = 1 AND status = 'finished'
+      AND EXISTS (SELECT 1 FROM source_files WHERE is_held_back AND status = 'waiting')
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 /** running → finished once every inbox file is done or needs review. */
@@ -551,4 +600,106 @@ export async function countFileResults(
         WHERE source_file_id = ${fileId} AND status = 'open') AS reviews
   `;
   return { lines: rows[0].lines as number, reviews: rows[0].reviews as number };
+}
+
+// ---------------------------------------------------------------------------
+// Agent run screen (Step 6). Read-only: everything the live screen shows.
+// ---------------------------------------------------------------------------
+
+export type SnapshotFile = SourceFileWithCount & {
+  supplier_initials: string | null;
+  supplier_colour: string | null;
+  /** UK time of the file's first event, e.g. "09:06", or null if not started. */
+  started_time: string | null;
+  /** ISO time of the file's latest event, for ordering. */
+  last_event_at: string | null;
+};
+
+export type SnapshotLine = {
+  id: number;
+  source_file_id: number;
+  supplier_name: string | null;
+  route: string;
+  category: Category | null;
+  rule_number: number | null;
+  price: string;
+  unit_note: string | null;
+  vat_note: string | null;
+  status: QuoteLine["status"];
+};
+
+export type SnapshotReview = {
+  id: number;
+  source_file_id: number | null;
+  quote_line_id: number | null;
+  reason_type: ReasonType;
+  status: "open" | "approved" | "edited" | "rejected";
+};
+
+export type SnapshotEvent = {
+  id: number;
+  source_file_id: number;
+  step_number: number;
+  tool_name: string;
+  text: string;
+  duration_ms: number | null;
+  created_at: string;
+  /** UK time, e.g. "09:06:12". */
+  time: string;
+};
+
+export type RunSnapshot = {
+  run: DemoRun;
+  files: SnapshotFile[];
+  lines: SnapshotLine[];
+  reviews: SnapshotReview[];
+  events: SnapshotEvent[];
+};
+
+export async function getRunSnapshot(): Promise<RunSnapshot> {
+  const [run, files, lines, reviews, events] = await Promise.all([
+    getDemoRun(),
+    db()`
+      SELECT f.id, f.supplier_id, s.name AS supplier_name, s.initials AS supplier_initials,
+             s.colour AS supplier_colour, f.sender_name,
+             f.file_name, f.file_path, f.type, f.received_at::text AS received_at,
+             to_char(f.received_at AT TIME ZONE 'Europe/London', 'HH24:MI') AS received_time,
+             to_char(f.received_at AT TIME ZONE 'Europe/London', 'Dy FMDD Mon') AS received_day,
+             f.is_held_back, f.is_upload, f.status,
+             (SELECT count(*)::int FROM quote_lines q
+               WHERE q.source_file_id = f.id AND NOT q.is_history) AS lines_found,
+             to_char((SELECT min(e.created_at) FROM agent_events e WHERE e.source_file_id = f.id)
+                     AT TIME ZONE 'Europe/London', 'HH24:MI') AS started_time,
+             (SELECT max(e.created_at) FROM agent_events e WHERE e.source_file_id = f.id)::text
+               AS last_event_at
+      FROM source_files f
+      LEFT JOIN suppliers s ON s.id = f.supplier_id
+      ORDER BY f.received_at, f.id
+    `,
+    db()`
+      SELECT q.id, q.source_file_id, s.name AS supplier_name, q.route, q.category,
+             q.rule_number, q.price::text AS price, q.unit_note, q.vat_note, q.status
+      FROM quote_lines q
+      LEFT JOIN suppliers s ON s.id = q.supplier_id
+      WHERE NOT q.is_history
+      ORDER BY q.source_file_id, q.id
+    `,
+    db()`
+      SELECT id, source_file_id, quote_line_id, reason_type, status
+      FROM review_items ORDER BY id
+    `,
+    db()`
+      SELECT id, source_file_id, step_number, tool_name, text, duration_ms,
+             created_at::text AS created_at,
+             to_char(created_at AT TIME ZONE 'Europe/London', 'HH24:MI:SS') AS time
+      FROM agent_events ORDER BY id
+    `,
+  ]);
+  return {
+    run,
+    files: files as SnapshotFile[],
+    lines: lines as SnapshotLine[],
+    reviews: reviews as SnapshotReview[],
+    events: events as SnapshotEvent[],
+  };
 }

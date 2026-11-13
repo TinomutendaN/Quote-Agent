@@ -12,6 +12,11 @@ export const iconPaths = {
   mail: "M3 6h18v12H3zM3 7l9 6 9-6",
   file: "M6 3h8l4 4v14H6zM14 3v4h4",
   sheet: "M4 4h16v16H4zM4 10h16M4 15h16M10 4v16",
+  // Agent run
+  live: "M12 3v3M12 18v3M3 12h3M18 12h3M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
+  table: "M4 5h16v14H4zM4 10h16M10 10v9",
+  log: "M5 4h14v16H5zM9 9h6M9 13h6M9 17h3",
+  step: "M14 4l6 6-9 9H5v-6zM12 6l6 6",
   // Misc
   back: "M15 6l-6 6 6 6",
   forward: "M9 6l6 6-6 6",
@@ -70,6 +75,15 @@ export function ClockIcon({ size = 22 }: { size?: number }) {
     >
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+/** Solid play triangle (Process inbox). */
+export function PlayIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M6 4l14 8-14 8z" />
     </svg>
   );
 }

@@ -87,6 +87,11 @@ export async function runQueues<F extends QueueFile>(
       for (const file of queue.files) {
         if (shouldStop()) return;
         await acquire();
+        // Pause may have been pressed while this queue waited for a free slot.
+        if (shouldStop()) {
+          release();
+          return;
+        }
         let keepGoing: boolean | void;
         try {
           keepGoing = await worker(file, queue);

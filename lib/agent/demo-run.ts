@@ -4,7 +4,9 @@ import { randomUUID } from "node:crypto";
 import {
   type DemoRun,
   claimDemoRun,
+  claimHeldBackRun,
   getDemoRun,
+  resetStalledHeldBack,
   resetStuckFiles,
 } from "@/lib/db";
 
@@ -12,32 +14,57 @@ import {
 export const STALL_MINUTES = 10;
 
 export type StartRunResult =
-  | { started: true; run_id: string; took_over: boolean; reset_file_ids: number[]; state: DemoRun }
+  | {
+      started: true;
+      /** "inbox": run the supplier queues. "held_back": the run is finished, run just file 16. */
+      mode: "inbox" | "held_back";
+      run_id: string;
+      took_over: boolean;
+      reset_file_ids: number[];
+      state: DemoRun;
+    }
   | { started: false; state: DemoRun; message: string };
 
 export async function startDemoRun(): Promise<StartRunResult> {
   const runId = randomUUID();
   const claim = await claimDemoRun(runId, STALL_MINUTES);
 
-  if (!claim) {
-    const state = await getDemoRun();
+  if (claim) {
+    // Taking over a stalled run: anything left half-done goes back to waiting.
+    const resetIds = claim.previous === "running" ? await resetStuckFiles() : [];
     return {
-      started: false,
-      state,
-      message:
-        state.status === "finished"
-          ? "The inbox has already been processed. Showing the saved results."
-          : "The agent is already working through the inbox. Showing its progress.",
+      started: true,
+      mode: "inbox",
+      run_id: runId,
+      took_over: claim.previous === "running",
+      reset_file_ids: resetIds,
+      state: await getDemoRun(),
     };
   }
 
-  // Taking over a stalled run: anything left half-done goes back to waiting.
-  const resetIds = claim.previous === "running" ? await resetStuckFiles() : [];
+  // Finished, but the new quote (file 16) never ran (e.g. the driver left).
+  let state = await getDemoRun();
+  if (state.status === "finished") {
+    await resetStalledHeldBack(STALL_MINUTES);
+    if (await claimHeldBackRun(runId)) {
+      return {
+        started: true,
+        mode: "held_back",
+        run_id: runId,
+        took_over: false,
+        reset_file_ids: [],
+        state,
+      };
+    }
+    state = await getDemoRun();
+  }
+
   return {
-    started: true,
-    run_id: runId,
-    took_over: claim.previous === "running",
-    reset_file_ids: resetIds,
-    state: await getDemoRun(),
+    started: false,
+    state,
+    message:
+      state.status === "finished"
+        ? "The inbox has already been processed. Showing the saved results."
+        : "The agent is already working through the inbox. Showing its progress.",
   };
 }

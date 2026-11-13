@@ -1,21 +1,25 @@
 import { Suspense } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { UNKNOWN_PANEL } from "@/components/colours";
+import { displayFileName } from "@/lib/fileNames";
 import {
   listHistoryLines,
   listRules,
   listSourceFiles,
   listSuppliers,
   type SourceFile,
+  type SourceFileWithCount,
 } from "@/lib/db";
 import { readEmailSubject } from "@/lib/samples";
+import { InboxNotice, ProcessInboxButton } from "./InboxActions";
 import { InboxView, type InboxFile, type InboxGroup } from "./InboxView";
 
 export default function InboxPage() {
   return (
     <>
-      {/* "Process inbox" and "Add quotes" are added in Step 6. */}
-      <PageHeader breadcrumb="Inbox" title="Inbox" />
+      {/* "Add quotes" is added in Step 6, checkpoint 2. */}
+      <PageHeader breadcrumb="Inbox" title="Inbox" actions={<ProcessInboxButton />} />
+      <InboxNotice />
       <Suspense fallback={<p className="m-0 text-sm text-slate">Loading the inbox…</p>}>
         <InboxData />
       </Suspense>
@@ -31,8 +35,10 @@ async function InboxData() {
     listRules(),
   ]);
 
-  // The held-back file (16) only appears after the inbox has been processed.
-  const inboxFiles = files.filter((f) => !f.is_held_back);
+  // The held-back file (16) only appears once the agent has processed it.
+  const inboxFiles = files.filter(
+    (f) => !f.is_held_back || f.status === "done" || f.status === "needs_review",
+  );
   const tiles = await Promise.all(inboxFiles.map(toTile));
 
   // Group by supplier, ordered by each supplier's first file.
@@ -78,10 +84,9 @@ const typeLabels: Record<SourceFile["type"], string> = {
   spreadsheet: "Spreadsheet",
 };
 
-async function toTile(f: SourceFile): Promise<InboxFile> {
+async function toTile(f: SourceFileWithCount): Promise<InboxFile> {
   const subject = f.type === "email" ? await readEmailSubject(f.file_path) : null;
-  // Sample files start with their number ("06_..."); the design shows the name without it.
-  const name = f.is_upload ? f.file_name : f.file_name.replace(/^\d+_/, "");
+  const name = displayFileName(f);
   const ext = f.file_name.split(".").pop()?.toLowerCase();
   const typeLabel =
     f.type === "spreadsheet"
@@ -98,6 +103,9 @@ async function toTile(f: SourceFile): Promise<InboxFile> {
     sender,
     initials: f.sender_name ? initialsOf(f.sender_name) : "?",
     status: f.status,
+    linesFound: f.lines_found,
+    // Uploads aren't kept, so they have nothing to open.
+    href: f.is_upload || !f.file_path ? null : f.file_path,
   };
 }
 
