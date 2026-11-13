@@ -126,7 +126,7 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - **Testing:** at most about 15 questions across all testing, with `npm run db:processed` plus the review actions (no agent runs). `npm run ask:test -- "question"` (dev server running) prints tool calls, the answer, Quotes used, a check that every £ figure in the answer appears in a tool result, and the cost.
 
 **Landing + Reset demo (Step 10)**
-- **Landing** (`app/page.tsx`) copies `docs/design/landing.dc.html`. "Try the demo" opens `/inbox`. "Tutorial video" only shows when `NEXT_PUBLIC_TUTORIAL_URL` is set (Step 12 adds it), and opens in a new tab, so it's never a dead button.
+- **Landing** (`app/page.tsx`) copies `docs/design/landing.dc.html`. "Try the agent" opens `/inbox`. "Tutorial video" always sits beside it: once `NEXT_PUBLIC_TUTORIAL_URL` is set (Step 12) it opens the video in a new tab; until then it shows greyed out with a "SOON" tag and isn't clickable, so it never looks like a broken button.
 - **Reset demo:** sidebar footer link with a short inline confirmation ("This clears everyone's progress and restores the fresh sample inbox."). `POST /api/reset` (`maxDuration` 60) calls `resetDatabase()` in `lib/db.ts`, which `npm run db:setup` / `db:processed` share: one transaction (Pool) running `db/schema.sql` + `db/seed.sql` (+ the fixture and `APPROVE_UNFLAGGED_SQL` in processed mode). On success the browser clears its `sessionStorage` (run token, Ask chat, notices) and reloads on `/inbox`.
 - **Reset is refused, changing nothing:** at most one reset per minute across all visitors (`demo_meta.last_reset_at`, claimed in the reset transaction) → 429 "The demo was just reset – try again in a minute."; while someone is using the agent (run `running` with activity in the last 10 minutes, file 16 `working` with recent run activity, or an upload `working` with an event or received time in the last 10 minutes) → 409 "Someone is running the demo right now – try again in a few minutes." A busy refusal rolls back, so it doesn't use the cooldown. The npm scripts skip both checks.
 - **Daily caps that Reset doesn't clear:** `daily_usage` (one row per UK day: `runs`, `uploads`, `questions`) and `demo_meta` are created with `CREATE TABLE IF NOT EXISTS` at the bottom of `schema.sql` and never dropped. Limits come from `DAILY_MAX_RUNS` (15), `DAILY_MAX_UPLOADS` (40), `DAILY_MAX_QUESTIONS` (150) via `lib/limits.ts`, which also holds the messages ("The demo has reached today's limit for new runs / added quotes / questions – it resets at midnight UK time."). Counting is one upsert that only increments while under the limit.
@@ -291,7 +291,7 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 **Needs:** Step 11.
 
 **Build:** Screen recording (about 3 minutes) that shows every feature, in this order:
-1. **Landing** – before/after card, press "Try the demo".
+1. **Landing** – before/after card, press "Try the agent".
 2. **Inbox** – type tabs, a supplier's history tab, the rules card, then "Add quotes" with one small file of your own, then "Process inbox".
 3. **Agent run** – live step tiles and the "What the agent is doing" panel, "Pause agent" and "Resume", a card's Result and Original file tabs, then the Extracted data and Activity log tabs.
 4. **Review queue** – reason tabs, a card's Original text and Price history tabs, one Edit, then Approve the rest.

@@ -5,7 +5,7 @@ import { Icon } from "@/components/Icon";
 // Landing page (docs/design/landing.dc.html). The before/after card is the
 // design's own illustration of file 01, not live data.
 
-/** Recording of the demo (Step 12). The button only shows once it's set. */
+/** Recording of the demo (Step 12). Until it's set the button shows as "coming soon". */
 const TUTORIAL_URL = process.env.NEXT_PUBLIC_TUTORIAL_URL?.trim() || null;
 
 export default function LandingPage() {
@@ -43,20 +43,31 @@ export default function LandingPage() {
                 className="inline-flex min-h-12 items-center gap-2 rounded-btn bg-primary px-[22px] text-sm font-semibold tracking-[0.03em] text-white no-underline hover:bg-primary-hover"
               >
                 <Icon name="plus" size={16} strokeWidth={2} />
-                TRY THE DEMO
+                TRY THE AGENT
               </Link>
-              {TUTORIAL_URL && (
+              {TUTORIAL_URL ? (
                 <a
                   href={TUTORIAL_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex min-h-12 items-center gap-2 rounded-btn border border-line-strong bg-white px-[22px] text-sm font-semibold tracking-[0.03em] text-ink no-underline"
                 >
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M5 3l16 9-16 9z" />
-                  </svg>
+                  <PlayTriangle />
                   TUTORIAL VIDEO
                 </a>
+              ) : (
+                // No recording yet: shown, but clearly not clickable.
+                <span
+                  aria-disabled="true"
+                  title="The tutorial video is coming soon"
+                  className="inline-flex min-h-12 cursor-default items-center gap-2 rounded-btn border border-line-strong bg-white px-[22px] text-sm font-semibold tracking-[0.03em] text-muted"
+                >
+                  <PlayTriangle />
+                  TUTORIAL VIDEO
+                  <span className="rounded-[4px] bg-pill px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.04em]">
+                    SOON
+                  </span>
+                </span>
               )}
             </div>
             <p className="m-0 text-[13px] text-muted">
@@ -80,6 +91,14 @@ export default function LandingPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+function PlayTriangle() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M5 3l16 9-16 9z" />
+    </svg>
   );
 }
 
