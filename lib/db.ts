@@ -97,6 +97,8 @@ export async function listRules(): Promise<Rule[]> {
 export type SourceFileWithCount = SourceFile & {
   /** Prices saved from this file (never past prices). */
   lines_found: number;
+  /** Review items on this file still waiting for a person. */
+  open_reviews: number;
 };
 
 /** All source files with their supplier name and saved-price count, oldest first. */
@@ -668,6 +670,8 @@ export async function getRunSnapshot(): Promise<RunSnapshot> {
              f.is_held_back, f.is_upload, f.status,
              (SELECT count(*)::int FROM quote_lines q
                WHERE q.source_file_id = f.id AND NOT q.is_history) AS lines_found,
+             (SELECT count(*)::int FROM review_items r
+               WHERE r.source_file_id = f.id AND r.status = 'open') AS open_reviews,
              to_char((SELECT min(e.created_at) FROM agent_events e WHERE e.source_file_id = f.id)
                      AT TIME ZONE 'Europe/London', 'HH24:MI') AS started_time,
              (SELECT max(e.created_at) FROM agent_events e WHERE e.source_file_id = f.id)::text
@@ -766,4 +770,294 @@ export async function deleteStalledUploads(stallMinutes: number): Promise<number
     RETURNING f.id
   `;
   return rows.length;
+}
+
+// ---------------------------------------------------------------------------
+// Review queue (Step 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Approves every line the agent never flagged, once its file has finished
+ * (done or needs review). A line counts as flagged when a review item points
+ * at it, or its whole file has a file-level item (unknown sender). Safe to
+ * run any number of times. $1 = one file id, or null for every file.
+ * Also run by `npm run db:processed` (scripts/db-setup.mjs).
+ */
+export const APPROVE_UNFLAGGED_SQL = `
+  UPDATE quote_lines q SET status = 'approved'
+  FROM source_files f
+  WHERE f.id = q.source_file_id
+    AND f.status IN ('done', 'needs_review')
+    AND ($1::int IS NULL OR f.id = $1::int)
+    AND NOT q.is_history
+    AND q.status = 'pending'
+    AND NOT EXISTS (SELECT 1 FROM review_items r WHERE r.quote_line_id = q.id)
+    AND NOT EXISTS (SELECT 1 FROM review_items r
+                    WHERE r.source_file_id = q.source_file_id AND r.quote_line_id IS NULL)
+  RETURNING q.id`;
+
+export async function approveUnflaggedLines(fileId: number | null = null): Promise<number> {
+  const rows = await db().query(APPROVE_UNFLAGGED_SQL, [fileId]);
+  return rows.length;
+}
+
+export type ReviewStatus = "approved" | "edited" | "rejected";
+
+export type ReviewLine = {
+  id: number;
+  route: string;
+  category: Category | null;
+  rule_number: number | null;
+  price: string;
+  unit_note: string | null;
+  vat_note: string | null;
+  time_slot: TimeSlot | null;
+  goods: Goods | null;
+};
+
+export type OpenReviewItem = {
+  id: number;
+  reason_type: ReasonType;
+  reason_text: string;
+  original_excerpt: string | null;
+  usual_price: string | null;
+  suggestion: string | null;
+  status: "open" | ReviewStatus;
+  source_file_id: number;
+  file_name: string;
+  file_path: string;
+  file_type: SourceFileType;
+  is_upload: boolean;
+  /** UK time the file arrived, e.g. "12:10". */
+  received_time: string;
+  supplier_id: number | null;
+  supplier_name: string | null;
+  /** The flagged line, or null for a file-level item (unknown sender). */
+  line: ReviewLine | null;
+};
+
+const REVIEW_ITEM_SELECT = `
+  SELECT r.id, r.reason_type, r.reason_text, r.original_excerpt,
+         r.usual_price::text AS usual_price, r.suggestion, r.status,
+         f.id AS source_file_id, f.file_name, f.file_path, f.type AS file_type, f.is_upload,
+         to_char(f.received_at AT TIME ZONE 'Europe/London', 'HH24:MI') AS received_time,
+         f.supplier_id, s.name AS supplier_name,
+         CASE WHEN q.id IS NULL THEN NULL ELSE json_build_object(
+           'id', q.id, 'route', q.route, 'category', q.category, 'rule_number', q.rule_number,
+           'price', q.price::text, 'unit_note', q.unit_note, 'vat_note', q.vat_note,
+           'time_slot', q.time_slot, 'goods', q.goods) END AS line
+  FROM review_items r
+  LEFT JOIN quote_lines q ON q.id = r.quote_line_id
+  JOIN source_files f ON f.id = COALESCE(r.source_file_id, q.source_file_id)
+  LEFT JOIN suppliers s ON s.id = f.supplier_id`;
+
+/** Review items still waiting for a person, oldest first. */
+export async function listOpenReviewItems(): Promise<OpenReviewItem[]> {
+  return (await db().query(
+    `${REVIEW_ITEM_SELECT} WHERE r.status = 'open' ORDER BY r.created_at, r.id`,
+  )) as OpenReviewItem[];
+}
+
+/** One review item (any status), or null. */
+export async function getReviewItem(id: number): Promise<OpenReviewItem | null> {
+  const rows = (await db().query(`${REVIEW_ITEM_SELECT} WHERE r.id = $1`, [id])) as OpenReviewItem[];
+  return rows[0] ?? null;
+}
+
+export type SameJobLine = {
+  id: number;
+  price: string;
+  status: QuoteLine["status"];
+  file_name: string;
+  is_upload: boolean;
+  /** UK time the line's file arrived, e.g. "11:30". */
+  received_time: string;
+  is_flagged: boolean;
+};
+
+// The "same job" match used by duplicates: same supplier, route, category,
+// time slot and goods, from a different file, never past prices. `q` is the
+// flagged line, `o` the flagged line itself or another quote for the job.
+const SAME_JOB = `
+  NOT o.is_history AND (o.id = q.id OR (
+    o.source_file_id <> q.source_file_id
+    AND o.status <> 'rejected'
+    AND o.supplier_id = q.supplier_id
+    AND lower(o.route) = lower(q.route)
+    AND o.category IS NOT DISTINCT FROM q.category
+    AND o.time_slot IS NOT DISTINCT FROM q.time_slot
+    AND o.goods IS NOT DISTINCT FROM q.goods))`;
+
+/** A flagged duplicate line and every other quote for the same job, oldest first. */
+export async function sameJobLines(lineId: number): Promise<SameJobLine[]> {
+  return (await db().query(
+    `SELECT o.id, o.price::text AS price, o.status, f.file_name, f.is_upload,
+            to_char(f.received_at AT TIME ZONE 'Europe/London', 'HH24:MI') AS received_time,
+            o.id = q.id AS is_flagged
+     FROM quote_lines q
+     JOIN quote_lines o ON ${SAME_JOB}
+     JOIN source_files f ON f.id = o.source_file_id
+     WHERE q.id = $1
+     ORDER BY f.received_at, o.id`,
+    [lineId],
+  )) as SameJobLine[];
+}
+
+/** Lines saved from one file (never past prices), in saved order. */
+export async function fileLines(fileId: number): Promise<ReviewLine[]> {
+  return (await db().query(
+    `SELECT id, route, category, rule_number, price::text AS price, unit_note, vat_note,
+            time_slot, goods
+     FROM quote_lines WHERE source_file_id = $1 AND NOT is_history ORDER BY id`,
+    [fileId],
+  )) as ReviewLine[];
+}
+
+// Every action below is ONE statement. Its first step closes the review item
+// only if it is still open (UPDATE … WHERE status = 'open'); every later step
+// joins to that result, so if someone else got there first nothing changes
+// and `resolved` is false ("Already handled").
+
+export type ResolvedLine = {
+  id: number;
+  route: string;
+  price: string;
+  unit_note: string | null;
+  category: Category | null;
+  status: QuoteLine["status"];
+};
+
+/** Price looks wrong / Unclear: approve, edit or reject the flagged line. */
+export async function resolveLineItem(
+  itemId: number,
+  change: {
+    itemStatus: ReviewStatus;
+    lineStatus: "approved" | "rejected";
+    price?: number | null;
+    unit?: string | null;
+    route?: string | null;
+    category?: Category | null;
+  },
+): Promise<{ resolved: boolean; line: ResolvedLine | null }> {
+  const rows = await db().query(
+    `WITH item AS (
+       UPDATE review_items SET status = $2, resolved_at = now()
+       WHERE id = $1 AND status = 'open' AND reason_type IN ('price_wrong', 'unclear')
+         AND quote_line_id IS NOT NULL
+       RETURNING quote_line_id),
+     upd AS (
+       UPDATE quote_lines l SET
+         status = $3,
+         price = COALESCE($4::numeric, l.price),
+         unit_note = COALESCE($5::text, l.unit_note),
+         route = COALESCE($6::text, l.route),
+         rule_number = CASE WHEN $7::text IS NOT NULL AND $7::text IS DISTINCT FROM l.category
+                            THEN NULL ELSE l.rule_number END,
+         category = COALESCE($7::text, l.category)
+       FROM item
+       WHERE l.id = item.quote_line_id AND NOT l.is_history
+       RETURNING l.id, l.route, l.price::text AS price, l.unit_note, l.category, l.status)
+     SELECT (SELECT count(*)::int FROM item) > 0 AS resolved,
+            (SELECT row_to_json(upd) FROM upd LIMIT 1) AS line`,
+    [
+      itemId,
+      change.itemStatus,
+      change.lineStatus,
+      change.price ?? null,
+      change.unit ?? null,
+      change.route ? tidyRoute(change.route) : null,
+      change.category ?? null,
+    ],
+  );
+  return { resolved: rows[0].resolved as boolean, line: (rows[0].line as ResolvedLine | null) ?? null };
+}
+
+/**
+ * Duplicate: keep one quote for the job and reject the others. "later" keeps
+ * the most recently received quote, "earlier" the first one. An optional new
+ * price is set on the kept quote.
+ */
+export async function resolveDuplicate(
+  itemId: number,
+  change: { itemStatus: ReviewStatus; keep: "later" | "earlier"; price?: number | null },
+): Promise<{ resolved: boolean; kept: { price: string; received_time: string } | null; rejected: number }> {
+  const rows = await db().query(
+    `WITH item AS (
+       UPDATE review_items SET status = $2, resolved_at = now()
+       WHERE id = $1 AND status = 'open' AND reason_type = 'duplicate' AND quote_line_id IS NOT NULL
+       RETURNING quote_line_id),
+     grp AS (
+       SELECT o.id, f.received_at,
+              to_char(f.received_at AT TIME ZONE 'Europe/London', 'HH24:MI') AS received_time
+       FROM item
+       JOIN quote_lines q ON q.id = item.quote_line_id
+       JOIN quote_lines o ON ${SAME_JOB}
+       JOIN source_files f ON f.id = o.source_file_id),
+     keep AS (
+       SELECT id, received_time FROM grp
+       ORDER BY CASE WHEN $3 = 'later' THEN -extract(epoch FROM received_at)
+                     ELSE extract(epoch FROM received_at) END,
+                CASE WHEN $3 = 'later' THEN -id ELSE id END
+       LIMIT 1),
+     upd AS (
+       UPDATE quote_lines l SET
+         status = CASE WHEN l.id IN (SELECT id FROM keep) THEN 'approved' ELSE 'rejected' END,
+         price = CASE WHEN l.id IN (SELECT id FROM keep) AND $4::numeric IS NOT NULL
+                      THEN $4::numeric ELSE l.price END
+       WHERE l.id IN (SELECT id FROM grp)
+       RETURNING l.id, l.status, l.price::text AS price)
+     SELECT (SELECT count(*)::int FROM item) > 0 AS resolved,
+            (SELECT json_build_object('price', u.price, 'received_time', k.received_time)
+               FROM upd u JOIN keep k ON k.id = u.id) AS kept,
+            (SELECT count(*)::int FROM upd WHERE status = 'rejected') AS rejected`,
+    [itemId, change.itemStatus, change.keep, change.price ?? null],
+  );
+  return {
+    resolved: rows[0].resolved as boolean,
+    kept: (rows[0].kept as { price: string; received_time: string } | null) ?? null,
+    rejected: rows[0].rejected as number,
+  };
+}
+
+/**
+ * Unknown sender. With a supplier: it is set on the file and on all its
+ * lines, and the lines (those with no open item of their own) are approved.
+ * With null (Reject): every line from the file is rejected.
+ */
+export async function resolveUnknownSender(
+  itemId: number,
+  change: { itemStatus: ReviewStatus; supplierId: number | null },
+): Promise<{ resolved: boolean; lines: number }> {
+  const rows = await db().query(
+    `WITH item AS (
+       UPDATE review_items SET status = $2, resolved_at = now()
+       WHERE id = $1 AND status = 'open' AND reason_type = 'unknown_sender'
+         AND source_file_id IS NOT NULL
+         AND ($3::int IS NULL OR EXISTS (SELECT 1 FROM suppliers WHERE id = $3::int))
+       RETURNING source_file_id),
+     file AS (
+       UPDATE source_files sf SET
+         supplier_id = $3::int,
+         sender_name = COALESCE(sf.sender_name, (SELECT name FROM suppliers WHERE id = $3::int))
+       FROM item
+       WHERE sf.id = item.source_file_id AND $3::int IS NOT NULL
+       RETURNING sf.id),
+     lines AS (
+       UPDATE quote_lines q SET
+         supplier_id = COALESCE($3::int, q.supplier_id),
+         status = CASE
+           WHEN $3::int IS NULL THEN 'rejected'
+           WHEN q.status = 'pending' AND NOT EXISTS (
+             SELECT 1 FROM review_items r WHERE r.quote_line_id = q.id AND r.status = 'open')
+             THEN 'approved'
+           ELSE q.status END
+       FROM item
+       WHERE q.source_file_id = item.source_file_id AND NOT q.is_history
+       RETURNING q.id)
+     SELECT (SELECT count(*)::int FROM item) > 0 AS resolved,
+            (SELECT count(*)::int FROM lines) AS lines,
+            (SELECT count(*)::int FROM file) AS files`,
+    [itemId, change.itemStatus, change.supplierId],
+  );
+  return { resolved: rows[0].resolved as boolean, lines: rows[0].lines as number };
 }

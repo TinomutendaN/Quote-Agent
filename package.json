@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:setup": "node scripts/db-setup.mjs",
-    "db:processed": "node scripts/db-setup.mjs --processed",
+    "db:setup": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/db-setup.mjs",
+    "db:processed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/db-setup.mjs --processed",
     "db:export-processed": "node scripts/export-fixture.mjs",
     "agent:test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/agent-test.mjs"
   },

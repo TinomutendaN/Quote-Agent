@@ -114,6 +114,7 @@ async function toTile(f: SourceFileWithCount): Promise<InboxFile> {
     initials: f.sender_name ? initialsOf(f.sender_name) : "?",
     status: f.status,
     linesFound: f.lines_found,
+    needsYou: f.open_reviews > 0,
     // Uploads aren't kept, so they have nothing to open.
     href: f.is_upload || !f.file_path ? null : f.file_path,
   };

@@ -21,7 +21,16 @@ const LOOK = {
   working: { panel: "#CDBDF2", fg: "#5B21B6", label: "Working", end: "IN PROGRESS", endFg: "#5B21B6" },
   needs_review: { panel: "#FBBDAB", fg: "#A3260C", label: "Needs you", end: "SENT TO REVIEW", endFg: "#B45309" },
   done: { panel: "#B9D6FB", fg: "#1D4ED8", label: "Done", end: "READY", endFg: "#1D4ED8" },
+  // Sent to review during the run, and every item on it has since been handled.
+  reviewed: { panel: "#B9D6FB", fg: "#1D4ED8", label: "Reviewed", end: "SENT TO REVIEW", endFg: "#B45309" },
 } as const;
+
+/** Files with at least one review item still waiting for a person. */
+function filesNeedingYou(snap: LiveSnapshot): Set<number> {
+  return new Set(
+    snap.reviews.filter((r) => r.status === "open" && r.source_file_id !== null).map((r) => r.source_file_id!),
+  );
+}
 
 const REASON_LABEL: Record<SnapshotReview["reason_type"], string> = {
   price_wrong: "Price looks wrong",
@@ -78,6 +87,19 @@ export function AgentRunView({ initial }: { initial: LiveSnapshot }) {
     if (wasBusy.current && !busy) fetchSnapshot(runId).then(setSnap).catch(() => {});
     wasBusy.current = busy;
   }, [busy, runId]);
+
+  // A tab left open here catches up (e.g. after items are handled in Review queue).
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible") fetchSnapshot(runId).then(setSnap).catch(() => {});
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [runId]);
 
   const openReviews = snap.reviews.filter((r) => r.status === "open").length;
 
@@ -147,9 +169,13 @@ function Notice({ text }: { text: string }) {
 
 function RunSummary({ snap }: { snap: LiveSnapshot }) {
   // Run progress counts the inbox only: never file 16 or uploads.
+  // "Need you" counts files with an open review item, not the file status:
+  // once its items are handled a file counts as Ready.
   const inbox = snap.files.filter(isInbox);
-  const ready = inbox.filter((f) => f.status === "done").length;
-  const need = inbox.filter((f) => f.status === "needs_review").length;
+  const needing = filesNeedingYou(snap);
+  const finished = inbox.filter((f) => f.status === "done" || f.status === "needs_review");
+  const need = finished.filter((f) => needing.has(f.id)).length;
+  const ready = finished.length - need;
   const working = inbox.filter((f) => f.status === "working").length;
   const waiting = inbox.filter((f) => f.status === "waiting").length;
   return (
@@ -282,7 +308,10 @@ function RunCard({
   fileReviews: SnapshotReview[];
 }) {
   const [tab, setTab] = useState<CardTab>("steps");
-  const look = LOOK[file.status as keyof typeof LOOK] ?? LOOK.working;
+  const look =
+    file.status === "needs_review" && fileReviews.length === 0
+      ? LOOK.reviewed
+      : (LOOK[file.status as keyof typeof LOOK] ?? LOOK.working);
   const tiles = groupSteps(events, file);
 
   return (

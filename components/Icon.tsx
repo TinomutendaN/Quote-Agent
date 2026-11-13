@@ -17,6 +17,11 @@ export const iconPaths = {
   table: "M4 5h16v14H4zM4 10h16M10 10v9",
   log: "M5 4h14v16H5zM9 9h6M9 13h6M9 17h3",
   step: "M14 4l6 6-9 9H5v-6zM12 6l6 6",
+  // Review queue
+  duplicate: "M8 8h12v12H8zM4 4h12v4M4 4v12h4",
+  question: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5M12 17h.01",
+  person: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1",
+  pin: "M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12zM12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
   // Misc
   back: "M15 6l-6 6 6 6",
   forward: "M9 6l6 6-6 6",

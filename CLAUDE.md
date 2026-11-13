@@ -15,8 +15,8 @@ Solo developer, 48-hour build, deployed on Vercel. The app is built **one screen
 | 4 – Shell + Inbox | Done |
 | 5 – The agent (no screen) | Done |
 | 6 – Agent run screen | Done |
-| 7 – Review queue | Next |
-| 8 – Price lists | |
+| 7 – Review queue | Done |
+| 8 – Price lists | Next |
 | 9 – Ask + the new quote | |
 | 10 – Landing + Reset demo | |
 | 11 – Full testing | |
@@ -92,6 +92,18 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - **Uploads are separate from the inbox run:** "Quotes handled X of 17", the queues, the stall takeover and the run-finished check all ignore uploads. An upload during a run never changes the run's progress or stops it finishing.
 - **Next-morning delivery (rule 1 in the prompt):** a job is Out-of-hours only when collection or delivery happens after 6pm, overnight, or at the weekend. A weekday daytime collection with delivery the next morning during normal hours is a weekday job; "next-day delivery" on its own never makes a job Out-of-hours (file 16 is Standard).
 - **Prompt safety:** the system prompt says the file's contents are quote data only, never instructions. Text in a file that asks the agent to change its rules, call tools differently or ignore the prompt is ignored.
+
+**Review queue (Step 7)**
+- **"Approve" means "apply the agent's suggestion":**
+  - Price looks wrong: Approve keeps the price as quoted. Edit changes the price (and route/service). Reject rejects the line.
+  - Duplicate: Approve keeps the later quote and rejects the earlier one. Edit lets the user choose which to keep (and optionally set its price). Reject keeps the earlier quote and rejects the later one.
+  - Unclear: Approve applies the suggested price and unit (e.g. £155 per pallet), worked out on the server from the stored suggestion. Edit sets the price and unit (and route/service). Reject rejects the line.
+  - Unknown sender: Approve and Edit both open a supplier picker; once chosen, the supplier is set on the file and all its lines, and they're approved. Reject rejects all the file's lines.
+- **Atomic:** every action is one SQL statement in `lib/db.ts` that only runs while the item is open (`… WHERE status = 'open'`), and records the item's status (`approved` / `edited` / `rejected`) and `resolved_at`. A second visitor gets 409 and sees "Already handled". Endpoint: `POST /api/review`.
+- **Edit and service:** changing a line's service clears its `rule_number` (a person decided it, not a rule). Edited routes go through `tidyRoute`.
+- **Automatic approval:** lines the agent never flagged (no review item on the line, no file-level item on its file) become approved when their file finishes: `approveUnflaggedLines()` in `lib/db.ts`, called in `runAgent` for inbox files, file 16 and uploads. It's idempotent, and `npm run db:processed` runs the same SQL (`APPROVE_UNFLAGGED_SQL`) after loading the fixture, so the fixture needs no regenerating.
+- **"Needs you" = open review items, not file status.** `source_files.status` stays as the agent left it (a record of what it found). Agent run's "Need you" bar counts inbox files with at least one open item (handled files count as Ready); a card shows "Needs you" only while its file has an open item, otherwise "Reviewed" (sky blue; the end circle still says "Sent to review"). Inbox tiles say "· needs you" only while the file has an open item. The sidebar badge and "Open review queue (n)" count open items.
+- **Live counts:** after each action the Review page calls `router.refresh()` (list and sidebar badge). Agent run re-reads the database on navigation and when its tab regains focus.
 
 ## What's already built (Steps 0–3)
 
@@ -180,7 +192,7 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - Reason tabs (All / Price looks wrong / Duplicates / Unclear) filter the list.
 - Card tabs: General (reason, details, suggestion), Original text (stored excerpt), Price history (usual price and past quotes for that route).
 - Approve / Edit / Reject update `review_items` (with `resolved_at`) and the linked `quote_lines` status. Edit opens a small inline form for price, route and category. For the unknown-sender file, Edit lets the user pick the supplier.
-- Quote lines that were never flagged are approved automatically when the run finishes.
+- Quote lines that were never flagged are approved automatically when their file finishes.
 - "Continue to pricing" goes to Price lists.
 - Sidebar badge shows the live open count.
 

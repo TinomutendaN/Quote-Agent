@@ -11,6 +11,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Pool } from "@neondatabase/serverless";
+import { APPROVE_UNFLAGGED_SQL } from "../lib/db.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -45,6 +46,10 @@ try {
   if (fixture) {
     console.log("Running db/fixture-processed.sql…");
     await client.query(fixture);
+    // The fixture was saved before lines were approved on finish (Step 7):
+    // approve the never-flagged lines exactly as the app does.
+    const approved = await client.query(APPROVE_UNFLAGGED_SQL, [null]);
+    console.log(`Approved ${approved.rowCount} lines the agent never flagged.`);
   }
   await client.query("COMMIT");
 

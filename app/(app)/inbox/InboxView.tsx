@@ -27,6 +27,8 @@ export type InboxFile = {
   initials: string;
   status: SourceFileStatus;
   linesFound: number;
+  /** Has a review item still waiting for a person (not just "was sent to review"). */
+  needsYou: boolean;
   /** The original sample file, or null for uploads (not kept). */
   href: string | null;
 };
@@ -63,7 +65,7 @@ function fileNote(f: InboxFile): string {
   if (f.status === "waiting") return "Not processed yet";
   if (f.status === "working") return "Being read";
   const found = `${f.linesFound} ${f.linesFound === 1 ? "price" : "prices"} found`;
-  return f.status === "needs_review" ? `${found} · needs you` : found;
+  return f.needsYou ? `${found} · needs you` : found;
 }
 
 export function InboxView({ groups, rules }: { groups: InboxGroup[]; rules: Rule[] }) {
@@ -107,9 +109,9 @@ export function InboxView({ groups, rules }: { groups: InboxGroup[]; rules: Rule
 }
 
 function groupStatus(files: InboxFile[]): string {
-  if (files.some((f) => f.status === "needs_review")) return "Needs you";
+  if (files.some((f) => f.needsYou)) return "Needs you";
   if (files.some((f) => f.status === "working")) return "Working";
-  if (files.every((f) => f.status === "done")) return "Done";
+  if (files.every((f) => f.status === "done" || f.status === "needs_review")) return "Done";
   return "New";
 }
 

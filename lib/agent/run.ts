@@ -4,6 +4,7 @@ import path from "node:path";
 import { isStepCount, streamText } from "ai";
 import { getModel, getProvider } from "@/lib/ai/model";
 import {
+  approveUnflaggedLines,
   clearFileResults,
   countFileResults,
   getSourceFile,
@@ -118,6 +119,8 @@ export async function runAgent(
     const counts = await countFileResults(file.id);
     const status = counts.reviews > 0 ? "needs_review" : "done";
     await setSourceFileStatus(file.id, status);
+    // Lines the agent never flagged are approved as soon as their file finishes.
+    await approveUnflaggedLines(file.id);
 
     emit({
       type: "finish",
