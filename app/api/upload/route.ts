@@ -6,7 +6,7 @@
 // is freed and the visitor can try again).
 //
 // Refused before anything is stored: wrong type (415), too big (413), the
-// 10-upload limit (429), or a missing/empty file (400). Uploads are separate
+// 10-upload limit or today's upload limit (429), or a missing/empty file (400). Uploads are separate
 // from the inbox run and never change its progress.
 import { STALL_MINUTES } from "@/lib/agent/demo-run";
 import type { AgentEvent } from "@/lib/agent/events";
@@ -19,6 +19,7 @@ import {
   getSourceFile,
   insertUpload,
 } from "@/lib/db";
+import { LIMIT_MESSAGES, dailyLimit } from "@/lib/limits";
 
 // Same as /api/agent: one file can take a few minutes on a slow scan.
 export const maxDuration = 300;
@@ -91,13 +92,16 @@ export async function POST(request: Request) {
   try {
     // Same occasion as the stall check: clear uploads whose request was cut off.
     await deleteStalledUploads(STALL_MINUTES);
-    const fileId = await insertUpload({ fileName, type: kind.type });
-    if (fileId === null) {
+    const inserted = await insertUpload({ fileName, type: kind.type }, dailyLimit("uploads"));
+    if ("limit" in inserted) {
       return refuse(
-        `This demo takes up to ${MAX_UPLOADS} uploads. Reset the demo to add more.`,
+        inserted.limit === "reset"
+          ? `This demo takes up to ${MAX_UPLOADS} uploads. Reset the demo to add more.`
+          : LIMIT_MESSAGES.uploads,
         429,
       );
     }
+    const fileId = inserted.id;
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({

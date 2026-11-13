@@ -1,6 +1,8 @@
 -- Quote Agent database schema.
--- Safe to re-run: drops every table (children first) and recreates it.
--- Used by `npm run db:setup` and, later, by Reset demo.
+-- Safe to re-run: drops every demo table (children first) and recreates it.
+-- Used by `npm run db:setup`, `npm run db:processed` and Reset demo.
+-- daily_usage and demo_meta (at the bottom) are never dropped: they hold the
+-- daily caps and the reset cooldown, which must survive every reset.
 
 DROP TABLE IF EXISTS demo_run CASCADE;
 DROP TABLE IF EXISTS agent_events CASCADE;
@@ -140,5 +142,26 @@ CREATE TABLE demo_run (
   run_id            uuid,                 -- secret token held by the browser that owns the run
   started_at        timestamptz,
   last_activity_at  timestamptz,
-  finished_at       timestamptz
+  finished_at       timestamptz,
+  saved_run         boolean NOT NULL DEFAULT false  -- true when Reset loaded the saved earlier run (daily run limit)
+);
+
+-- ---------------------------------------------------------------------------
+-- Kept across resets: created only if missing, never dropped.
+-- ---------------------------------------------------------------------------
+
+-- Usage per UK day ((now() AT TIME ZONE 'Europe/London')::date), so a shared
+-- public demo can't run up model costs. Counted atomically (only while under
+-- the limit set by DAILY_MAX_RUNS / DAILY_MAX_UPLOADS / DAILY_MAX_QUESTIONS).
+CREATE TABLE IF NOT EXISTS daily_usage (
+  day        date PRIMARY KEY,
+  runs       integer NOT NULL DEFAULT 0,   -- full inbox runs started (not takeovers, not file 16)
+  uploads    integer NOT NULL DEFAULT 0,   -- "Add quotes" files accepted
+  questions  integer NOT NULL DEFAULT 0    -- Ask questions sent to the model
+);
+
+-- One row: when Reset demo last ran (at most one reset per minute).
+CREATE TABLE IF NOT EXISTS demo_meta (
+  id             integer PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  last_reset_at  timestamptz
 );

@@ -1,6 +1,8 @@
 // Database client and every SQL query (fixed and parameterised).
 // The model never writes SQL: agent and Ask tools call functions in this file.
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { Pool, neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import type { Markup, PriceLine, PriceRow } from "./pricing";
 
 let client: NeonQueryFunction<false, false> | null = null;
@@ -661,6 +663,8 @@ export type DemoRun = {
   started_at: string | null;
   last_activity_at: string | null;
   finished_at: string | null;
+  /** True when Reset loaded the saved earlier run because the daily run limit was reached. */
+  saved_run: boolean;
   /** Inbox files (not held back, not uploads) by status. */
   files: { waiting: number; working: number; done: number; needs_review: number };
 };
@@ -669,6 +673,7 @@ export async function getDemoRun(): Promise<DemoRun> {
   const rows = await db()`
     SELECT r.status, r.started_at::text AS started_at,
            r.last_activity_at::text AS last_activity_at, r.finished_at::text AS finished_at,
+           r.saved_run,
            (SELECT json_build_object(
               'waiting',      count(*) FILTER (WHERE status = 'waiting'),
               'working',      count(*) FILTER (WHERE status = 'working'),
@@ -683,14 +688,27 @@ export async function getDemoRun(): Promise<DemoRun> {
 /**
  * Starts the run in one statement: idle → running, or takes over a running
  * run with no activity for `stallMinutes`. Returns the previous status when
- * this call won, or null when a run is already going (or finished).
+ * this call won, or null when a run is already going (or finished), or the
+ * run is idle but today's run limit is reached.
+ *
+ * A fresh start (idle → running) counts one run in daily_usage in the same
+ * statement, and only succeeds if that count was still under `maxRuns`.
+ * Taking over a stalled run isn't counted.
  */
 export async function claimDemoRun(
   runId: string,
   stallMinutes: number,
+  maxRuns: number,
 ): Promise<{ previous: "idle" | "running" } | null> {
   const rows = await db()`
-    WITH prev AS (SELECT status FROM demo_run WHERE id = 1 FOR UPDATE)
+    WITH prev AS (SELECT status FROM demo_run WHERE id = 1 FOR UPDATE),
+    counted AS (
+      INSERT INTO daily_usage AS u (day, runs)
+      SELECT (now() AT TIME ZONE 'Europe/London')::date, 1 FROM prev
+      WHERE prev.status = 'idle' AND ${maxRuns}::int > 0
+      ON CONFLICT (day) DO UPDATE SET runs = u.runs + 1 WHERE u.runs < ${maxRuns}::int
+      RETURNING u.runs
+    )
     UPDATE demo_run r
     SET status = 'running',
         run_id = ${runId}::uuid,
@@ -699,7 +717,7 @@ export async function claimDemoRun(
         finished_at = NULL
     FROM prev
     WHERE r.id = 1
-      AND (prev.status = 'idle'
+      AND ((prev.status = 'idle' AND EXISTS (SELECT 1 FROM counted))
            OR (prev.status = 'running'
                AND r.last_activity_at < now() - make_interval(mins => ${stallMinutes}::int)))
     RETURNING prev.status AS previous
@@ -927,23 +945,39 @@ export const MAX_UPLOADS = 10;
 
 /**
  * Adds an uploaded file, already claimed (status working), unless the
- * upload limit is reached. The advisory lock makes the count-and-insert safe
- * when two uploads arrive at once. Returns the new id, or null at the limit.
+ * per-reset upload limit (MAX_UPLOADS) or today's limit (`maxDaily`) is
+ * reached. The daily count goes up in the same statement as the insert, and
+ * only when both limits allow it, so a refused upload never uses a slot. The
+ * advisory lock makes the count-and-insert safe when two uploads arrive at
+ * once. Returns the new id, or which limit was reached.
  */
-export async function insertUpload(file: {
-  fileName: string;
-  type: SourceFileType;
-}): Promise<number | null> {
+export async function insertUpload(
+  file: { fileName: string; type: SourceFileType },
+  maxDaily: number,
+): Promise<{ id: number } | { limit: "reset" | "daily" }> {
   const results = await db().transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(6006)`,
-    tx`INSERT INTO source_files (supplier_id, sender_name, file_name, file_path, type,
+    tx`WITH room AS (
+         SELECT count(*) < ${MAX_UPLOADS} AS ok FROM source_files WHERE is_upload
+       ),
+       counted AS (
+         INSERT INTO daily_usage AS u (day, uploads)
+         SELECT (now() AT TIME ZONE 'Europe/London')::date, 1 FROM room
+         WHERE room.ok AND ${maxDaily}::int > 0
+         ON CONFLICT (day) DO UPDATE SET uploads = u.uploads + 1 WHERE u.uploads < ${maxDaily}::int
+         RETURNING u.uploads
+       )
+       INSERT INTO source_files (supplier_id, sender_name, file_name, file_path, type,
                                  received_at, is_held_back, is_upload, status)
        SELECT NULL, NULL, ${file.fileName}, '', ${file.type}, now(), false, true, 'working'
-       WHERE (SELECT count(*) FROM source_files WHERE is_upload) < ${MAX_UPLOADS}
+       WHERE EXISTS (SELECT 1 FROM counted)
        RETURNING id`,
+    tx`SELECT count(*)::int AS uploads FROM source_files WHERE is_upload`,
   ]);
   const rows = results[1] as { id: number }[];
-  return rows[0]?.id ?? null;
+  if (rows[0]) return { id: rows[0].id };
+  const uploads = (results[2] as { uploads: number }[])[0].uploads;
+  return { limit: uploads >= MAX_UPLOADS ? "reset" : "daily" };
 }
 
 /** identify_supplier: sets (or clears) an upload's supplier, also on lines already saved. */
@@ -1272,4 +1306,149 @@ export async function resolveUnknownSender(
     [itemId, change.itemStatus, change.supplierId],
   );
   return { resolved: rows[0].resolved as boolean, lines: rows[0].lines as number };
+}
+
+// ---------------------------------------------------------------------------
+// Daily usage (Step 10). The daily_usage table is never dropped, so Reset
+// demo doesn't clear it. The day is the UK day.
+// ---------------------------------------------------------------------------
+
+export type DailyUsage = { runs: number; uploads: number; questions: number };
+
+/** Today's counts (zeros if nothing has been used yet today). */
+export async function getDailyUsage(): Promise<DailyUsage> {
+  const rows = await db()`
+    SELECT runs, uploads, questions FROM daily_usage
+    WHERE day = (now() AT TIME ZONE 'Europe/London')::date
+  `;
+  return (rows[0] as DailyUsage | undefined) ?? { runs: 0, uploads: 0, questions: 0 };
+}
+
+/**
+ * Counts one Ask question for today, only while under `max`, in one
+ * statement. Returns false when today's limit is already reached.
+ */
+export async function takeQuestionAllowance(max: number): Promise<boolean> {
+  const rows = await db()`
+    INSERT INTO daily_usage AS u (day, questions)
+    SELECT (now() AT TIME ZONE 'Europe/London')::date, 1 WHERE ${max}::int > 0
+    ON CONFLICT (day) DO UPDATE SET questions = u.questions + 1 WHERE u.questions < ${max}::int
+    RETURNING u.questions
+  `;
+  return rows.length > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Reset demo (Step 10) and npm run db:setup / db:processed
+// ---------------------------------------------------------------------------
+
+export type ResetMode = "fresh" | "processed";
+
+export type ResetResult =
+  | { ok: true; mode: ResetMode; approved: number }
+  | { ok: false; reason: "cooldown" | "busy" };
+
+/**
+ * Rebuilds the demo tables in one transaction: db/schema.sql and
+ * db/seed.sql, plus db/fixture-processed.sql in "processed" mode (with the
+ * never-flagged lines approved, exactly as the app does). daily_usage and
+ * demo_meta are kept (schema.sql never drops them).
+ *
+ * With `checks` (Reset demo), it first refuses, changing nothing, when:
+ *   - the demo was reset less than `cooldownSeconds` ago (by anyone), or
+ *   - someone is using the agent: the run is going with activity in the last
+ *     `stallMinutes`, file 16 is being read, or an upload is being read.
+ * `savedRun` marks the result as the saved earlier run (shows a note).
+ *
+ * Uses Pool (WebSocket) because a query with no parameters goes over the
+ * simple query protocol, which takes a whole file of statements at once.
+ */
+export async function resetDatabase(options: {
+  mode: ResetMode;
+  checks: { cooldownSeconds: number; stallMinutes: number } | null;
+  savedRun?: boolean;
+  /** Project folder holding db/*.sql (defaults to the current folder). */
+  root?: string;
+}): Promise<ResetResult> {
+  const url = process.env.DATABASE_URL?.trim();
+  if (!url) throw new Error("DATABASE_URL is missing. Set it in .env.local (or in Vercel).");
+
+  const dir = path.join(options.root ?? process.cwd(), "db");
+  const schema = readFileSync(path.join(dir, "schema.sql"), "utf8");
+  const seed = readFileSync(path.join(dir, "seed.sql"), "utf8");
+  const fixture =
+    options.mode === "processed" ? readFileSync(path.join(dir, "fixture-processed.sql"), "utf8") : null;
+
+  const pool = new Pool({ connectionString: url });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Two resets never overlap.
+    await client.query("SELECT pg_advisory_xact_lock(6010)");
+
+    if (options.checks) {
+      const { cooldownSeconds, stallMinutes } = options.checks;
+      // At most one reset per cooldown, across all visitors.
+      const slot = await client.query(
+        `INSERT INTO demo_meta AS m (id, last_reset_at) VALUES (1, now())
+         ON CONFLICT (id) DO UPDATE SET last_reset_at = now()
+         WHERE m.last_reset_at IS NULL
+            OR m.last_reset_at < now() - make_interval(secs => $1::int)
+         RETURNING id`,
+        [cooldownSeconds],
+      );
+      if (slot.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "cooldown" };
+      }
+
+      // Lock the run row so nobody can start a run while this decides.
+      await client.query("SELECT id FROM demo_run WHERE id = 1 FOR UPDATE");
+      const busy = await client.query(
+        `SELECT
+           EXISTS (
+             SELECT 1 FROM demo_run r
+             WHERE r.id = 1
+               AND r.last_activity_at > now() - make_interval(mins => $1::int)
+               AND (r.status = 'running'
+                    OR (r.status = 'finished'
+                        AND EXISTS (SELECT 1 FROM source_files
+                                    WHERE is_held_back AND status = 'working')))
+           )
+           OR EXISTS (
+             SELECT 1 FROM source_files f
+             WHERE f.is_upload AND f.status = 'working'
+               AND COALESCE((SELECT max(e.created_at) FROM agent_events e WHERE e.source_file_id = f.id),
+                            f.received_at) > now() - make_interval(mins => $1::int)
+           ) AS busy`,
+        [stallMinutes],
+      );
+      if (busy.rows[0]?.busy) {
+        // Also undoes the cooldown slot taken above.
+        await client.query("ROLLBACK");
+        return { ok: false, reason: "busy" };
+      }
+    }
+
+    await client.query(schema);
+    await client.query(seed);
+    let approved = 0;
+    if (fixture) {
+      await client.query(fixture);
+      // The fixture was saved before lines were approved on finish (Step 7).
+      const result = await client.query(APPROVE_UNFLAGGED_SQL, [null]);
+      approved = result.rowCount ?? 0;
+    }
+    if (options.savedRun) {
+      await client.query("UPDATE demo_run SET saved_run = true WHERE id = 1");
+    }
+    await client.query("COMMIT");
+    return { ok: true, mode: options.mode, approved };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+    await pool.end();
+  }
 }

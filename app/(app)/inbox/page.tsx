@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { PageHeader } from "@/components/PageHeader";
+import { SavedRunNote } from "@/components/SavedRunNote";
 import { UNKNOWN_PANEL } from "@/components/colours";
 import { displayFileName } from "@/lib/fileNames";
 import {
@@ -28,6 +29,9 @@ export default function InboxPage() {
         }
       />
       <InboxNotice />
+      <Suspense fallback={null}>
+        <SavedRunNote />
+      </Suspense>
       <Suspense fallback={<p className="m-0 text-sm text-slate">Loading the inbox…</p>}>
         <InboxData />
       </Suspense>

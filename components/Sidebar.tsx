@@ -2,9 +2,7 @@ import { Suspense } from "react";
 import { countOpenReviewItems } from "@/lib/db";
 import { Icon } from "./Icon";
 import { NavLinks } from "./NavLinks";
-
-// "Reset demo" is built in Step 10. Until then the link stays hidden.
-const SHOW_RESET_DEMO = false;
+import { ResetDemo } from "./ResetDemo";
 
 export function Sidebar() {
   return (
@@ -33,15 +31,7 @@ export function Sidebar() {
 
       <div className="mt-auto flex flex-col gap-0.5 px-3 pt-4 text-xs text-muted">
         <span>Northline Couriers · sample data</span>
-        {SHOW_RESET_DEMO && (
-          <a
-            href="#"
-            className="inline-flex min-h-11 items-center gap-1.5 text-[13px] font-semibold no-underline"
-          >
-            <Icon name="reset" size={14} strokeWidth={2} />
-            Reset demo
-          </a>
-        )}
+        <ResetDemo />
       </div>
     </nav>
   );

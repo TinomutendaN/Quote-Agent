@@ -10,6 +10,8 @@ const nextConfig: NextConfig = {
     "/inbox": ["./public/samples/*.txt"],
     // The agent reads the sample quote files from disk.
     "/api/agent": ["./public/samples/**"],
+    // Reset demo runs the SQL files in db/.
+    "/api/reset": ["./db/*.sql"],
   },
   turbopack: {
     rules: {

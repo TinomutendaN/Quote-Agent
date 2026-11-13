@@ -1,6 +1,7 @@
 // The one shared "Process inbox" run. Everyone shares one database, so only
 // one browser may run the inbox at a time; it proves ownership with run_id.
 import { randomUUID } from "node:crypto";
+import { LIMIT_MESSAGES, dailyLimit } from "@/lib/limits";
 import {
   type DemoRun,
   claimDemoRun,
@@ -24,13 +25,13 @@ export type StartRunResult =
       reset_file_ids: number[];
       state: DemoRun;
     }
-  | { started: false; state: DemoRun; message: string };
+  | { started: false; state: DemoRun; message: string; limit_reached?: boolean };
 
 export async function startDemoRun(): Promise<StartRunResult> {
   // Same occasion as the stall check: clear uploads whose request was cut off.
   await deleteStalledUploads(STALL_MINUTES);
   const runId = randomUUID();
-  const claim = await claimDemoRun(runId, STALL_MINUTES);
+  const claim = await claimDemoRun(runId, STALL_MINUTES, dailyLimit("runs"));
 
   if (claim) {
     // Taking over a stalled run: anything left half-done goes back to waiting.
@@ -47,6 +48,10 @@ export async function startDemoRun(): Promise<StartRunResult> {
 
   // Finished, but the new quote (file 16) never ran (e.g. the driver left).
   let state = await getDemoRun();
+  // Still idle: the only reason a fresh start is refused is today's run limit.
+  if (state.status === "idle") {
+    return { started: false, state, message: LIMIT_MESSAGES.runs, limit_reached: true };
+  }
   if (state.status === "finished") {
     await resetStalledHeldBack(STALL_MINUTES);
     if (await claimHeldBackRun(runId)) {

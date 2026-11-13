@@ -21,6 +21,18 @@ const SOURCES_SHOWN = 5;
 
 const ERROR_TEXT = "Something went wrong – try again.";
 
+/**
+ * The server's own plain-English message (e.g. today's question limit), which
+ * the chat transport passes on as the error text; otherwise the general one.
+ */
+function errorText(error: Error): string {
+  try {
+    const body = JSON.parse(error.message) as { error?: unknown };
+    if (typeof body.error === "string" && body.error) return body.error;
+  } catch {}
+  return ERROR_TEXT;
+}
+
 export function AskView() {
   const transport = useMemo(() => new DefaultChatTransport<AskMessage>({ api: "/api/ask" }), []);
   const { messages, sendMessage, setMessages, status, error, clearError } = useChat<AskMessage>({ transport });
@@ -87,7 +99,7 @@ export function AskView() {
       )}
       {error && (
         <p role="alert" className="m-0 text-[15px] text-on-salmon">
-          {ERROR_TEXT}
+          {errorText(error)}
         </p>
       )}
 

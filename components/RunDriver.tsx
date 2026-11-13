@@ -280,6 +280,9 @@ export function RunDriverProvider({ children }: { children: ReactNode }) {
         setPausedBoth(false);
         router.push("/agent");
         void drive();
+      } else if (body.limit_reached) {
+        // Today's run limit: stay on the Inbox and say so.
+        setNotice(body.message);
       } else if (runIdRef.current) {
         // This browser already drives the run (e.g. paused after a reload).
         router.push("/agent");

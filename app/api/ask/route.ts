@@ -7,6 +7,8 @@ import { z } from "zod";
 import { getModel } from "@/lib/ai/model";
 import { ASK_INSTRUCTIONS, type AskMetadata, MAX_QUESTION_LENGTH } from "@/lib/ask/prompt";
 import { createAskTools } from "@/lib/ask/tools";
+import { takeQuestionAllowance } from "@/lib/db";
+import { LIMIT_MESSAGES, dailyLimit } from "@/lib/limits";
 
 export const maxDuration = 60;
 
@@ -46,6 +48,16 @@ export async function POST(request: Request) {
   if (!question) return fail("Please type a question.", 400);
   if (question.length > MAX_QUESTION_LENGTH) {
     return fail(`Questions can be at most ${MAX_QUESTION_LENGTH} characters.`, 400);
+  }
+
+  // Counted before the model is called; refused once today's limit is reached.
+  try {
+    if (!(await takeQuestionAllowance(dailyLimit("questions")))) {
+      return fail(LIMIT_MESSAGES.questions, 429);
+    }
+  } catch (error) {
+    console.error("[ask] usage count failed:", error);
+    return fail("Something went wrong – try again.", 500);
   }
 
   // Earlier turns as text only: tool results from past answers aren't re-sent.

@@ -4,14 +4,14 @@
 //                                looks exactly as if the agent had just finished,
 //                                with no model calls – for testing later steps)
 //
-// Uses Pool (WebSocket) from @neondatabase/serverless because a query with no
-// parameters goes over Postgres's simple query protocol, which accepts a whole
-// file of statements at once. Everything runs in one transaction.
-import { readFileSync, existsSync } from "node:fs";
+// Shares resetDatabase() in lib/db.ts with Reset demo (one transaction), but
+// skips Reset's checks (cooldown, someone using the agent) and never marks
+// the result as the saved earlier run. daily_usage and demo_meta are kept.
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Pool } from "@neondatabase/serverless";
-import { APPROVE_UNFLAGGED_SQL } from "../lib/db.ts";
+import { resetDatabase } from "../lib/db.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -24,35 +24,29 @@ if (!url) {
   process.exit(1);
 }
 
-const schema = readFileSync(join(root, "db", "schema.sql"), "utf8");
-const seed = readFileSync(join(root, "db", "seed.sql"), "utf8");
 const processed = process.argv.includes("--processed");
-const fixturePath = join(root, "db", "fixture-processed.sql");
-if (processed && !existsSync(fixturePath)) {
+if (processed && !existsSync(join(root, "db", "fixture-processed.sql"))) {
   console.error("db/fixture-processed.sql is missing. Make it with npm run db:export-processed.");
   process.exit(1);
 }
-const fixture = processed ? readFileSync(fixturePath, "utf8") : null;
+
+try {
+  console.log(
+    processed
+      ? "Running db/schema.sql, db/seed.sql and db/fixture-processed.sql…"
+      : "Running db/schema.sql and db/seed.sql…",
+  );
+  const result = await resetDatabase({ mode: processed ? "processed" : "fresh", checks: null, root });
+  if (processed && result.ok) console.log(`Approved ${result.approved} lines the agent never flagged.`);
+} catch (err) {
+  console.error("Database setup failed:", err.message);
+  process.exit(1);
+}
 
 const pool = new Pool({ connectionString: url });
 const client = await pool.connect();
 
 try {
-  await client.query("BEGIN");
-  console.log("Running db/schema.sql…");
-  await client.query(schema);
-  console.log("Running db/seed.sql…");
-  await client.query(seed);
-  if (fixture) {
-    console.log("Running db/fixture-processed.sql…");
-    await client.query(fixture);
-    // The fixture was saved before lines were approved on finish (Step 7):
-    // approve the never-flagged lines exactly as the app does.
-    const approved = await client.query(APPROVE_UNFLAGGED_SQL, [null]);
-    console.log(`Approved ${approved.rowCount} lines the agent never flagged.`);
-  }
-  await client.query("COMMIT");
-
   const { rows } = await client.query(`
     SELECT 'suppliers' AS table_name, count(*)::int AS rows FROM suppliers
     UNION ALL SELECT 'rules', count(*)::int FROM rules
@@ -70,8 +64,7 @@ try {
   console.table(rows);
   console.log(processed ? "Database ready, as if the agent had just finished." : "Database ready.");
 } catch (err) {
-  await client.query("ROLLBACK").catch(() => {});
-  console.error("Database setup failed:", err.message);
+  console.error("Couldn't read the table counts:", err.message);
   process.exitCode = 1;
 } finally {
   client.release();

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { SavedRunNote } from "@/components/SavedRunNote";
 import { getRunSnapshot } from "@/lib/db";
 import { AgentRunView } from "./AgentRunView";
 
@@ -14,5 +15,14 @@ export default function AgentPage() {
 
 async function AgentRunData() {
   const snapshot = await getRunSnapshot();
-  return <AgentRunView initial={{ ...snapshot, you_drive: false }} />;
+  return (
+    <AgentRunView
+      initial={{ ...snapshot, you_drive: false }}
+      note={
+        <Suspense fallback={null}>
+          <SavedRunNote />
+        </Suspense>
+      }
+    />
+  );
 }

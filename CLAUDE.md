@@ -18,8 +18,8 @@ Solo developer, 48-hour build, deployed on Vercel. The app is built **one screen
 | 7 – Review queue | Done |
 | 8 – Price lists | Done |
 | 9 – Ask + the new quote | Done |
-| 10 – Landing + Reset demo | Next |
-| 11 – Full testing | |
+| 10 – Landing + Reset demo | Done |
+| 11 – Full testing | Next |
 | 12 – Demo video | |
 
 Update this table at the end of each step.
@@ -75,7 +75,7 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - **Files run in parallel, one queue per supplier.** `lib/agent/queues.ts` (shared by the browser and `npm run agent:test`) splits the inbox into one queue per supplier plus one for the unknown-sender file. Files in a queue run in received order (so Swift Haul's 03 finishes before 04 and the duplicate is caught); queues run side by side, at most 6 files at once. The held-back file 16 is in no queue. A failed file stops its own queue so a later quote never overtakes it. The server enforces the same order: `/api/agent` refuses a supplier's file while an earlier-received file from that supplier is still waiting or working. Build the queues from a file list read *after* `POST /api/run`, because taking over a stalled run puts stuck files back to waiting.
 - **Only one run at a time.** `POST /api/run` starts the run with one atomic `UPDATE … WHERE status = 'idle'`; exactly one caller gets a `run_id`, everyone else gets the current state. `/api/agent` only accepts inbox files from the `run_id` owner (file 16 also after the run has finished) and claims each file atomically (`waiting` → `working`), so no file is processed twice; anything else gets a 409 with a plain message. The run becomes `finished` when every inbox file is done or needs review. A run with no activity for 10 minutes is stalled: the next start takes it over, files stuck as `working` go back to `waiting` with their partial lines and review items cleared, and only waiting files are sent again.
 - **New quote moment is automatic.** When the last inbox file finishes, the agent processes the held-back M6 Express email (file 16) once.
-- **Reset demo** lives in the sidebar footer. All visitors share one database; reset restores the fresh sample data by re-running `db/schema.sql` and `db/seed.sql`.
+- **Reset demo** lives in the sidebar footer. All visitors share one database; reset restores the fresh sample data by re-running `db/schema.sql` and `db/seed.sql` (or the saved earlier run once today's run limit is reached – see Step 10).
 - **Rules are read-only** in the demo.
 - **Uploads ("Add quotes")** are processed immediately because files aren't stored. Keep upload size small and show a clear message if a file is too large or the wrong type.
 - **Removed from the designs (do not build):** Sort and Filters, card Edit/More/Expand icons, supplier Contact tab, Edit rules tab, Saved answers, Automatic updates tab.
@@ -125,12 +125,23 @@ Per-pallet and unclear-unit handling belongs in the agent's system prompt, not i
 - **Focused and cheap:** questions about this demo's quotes, prices and versions only; anything else gets "I can only answer questions about these quotes and price lists." Questions are at most 300 characters, at most 6 tool steps per answer (the 7th step has tools off so it always answers), answers stream in. Only the last 4 turns are sent to the model, text only. Chat history lives only in the visitor's browser tab (`sessionStorage`).
 - **Testing:** at most about 15 questions across all testing, with `npm run db:processed` plus the review actions (no agent runs). `npm run ask:test -- "question"` (dev server running) prints tool calls, the answer, Quotes used, a check that every £ figure in the answer appears in a tool result, and the cost.
 
+**Landing + Reset demo (Step 10)**
+- **Landing** (`app/page.tsx`) copies `docs/design/landing.dc.html`. "Try the demo" opens `/inbox`. "Tutorial video" only shows when `NEXT_PUBLIC_TUTORIAL_URL` is set (Step 12 adds it), and opens in a new tab, so it's never a dead button.
+- **Reset demo:** sidebar footer link with a short inline confirmation ("This clears everyone's progress and restores the fresh sample inbox."). `POST /api/reset` (`maxDuration` 60) calls `resetDatabase()` in `lib/db.ts`, which `npm run db:setup` / `db:processed` share: one transaction (Pool) running `db/schema.sql` + `db/seed.sql` (+ the fixture and `APPROVE_UNFLAGGED_SQL` in processed mode). On success the browser clears its `sessionStorage` (run token, Ask chat, notices) and reloads on `/inbox`.
+- **Reset is refused, changing nothing:** at most one reset per minute across all visitors (`demo_meta.last_reset_at`, claimed in the reset transaction) → 429 "The demo was just reset – try again in a minute."; while someone is using the agent (run `running` with activity in the last 10 minutes, file 16 `working` with recent run activity, or an upload `working` with an event or received time in the last 10 minutes) → 409 "Someone is running the demo right now – try again in a few minutes." A busy refusal rolls back, so it doesn't use the cooldown. The npm scripts skip both checks.
+- **Daily caps that Reset doesn't clear:** `daily_usage` (one row per UK day: `runs`, `uploads`, `questions`) and `demo_meta` are created with `CREATE TABLE IF NOT EXISTS` at the bottom of `schema.sql` and never dropped. Limits come from `DAILY_MAX_RUNS` (15), `DAILY_MAX_UPLOADS` (40), `DAILY_MAX_QUESTIONS` (150) via `lib/limits.ts`, which also holds the messages ("The demo has reached today's limit for new runs / added quotes / questions – it resets at midnight UK time."). Counting is one upsert that only increments while under the limit.
+  - **Runs:** counted in `claimDemoRun`'s statement, only for a fresh start (idle → running); stalled takeovers and the file 16 claim aren't counted. At the limit, Process inbox stays on the Inbox with the message.
+  - **Uploads:** counted in the same statement as the insert, only if the per-reset limit (10) also allows it, so a refused upload never uses a daily slot. A failed upload frees its per-reset slot but not its daily one.
+  - **Questions:** counted in `/api/ask` before the model is called; at the limit 429 with the message, which Ask shows instead of the general error.
+- **Saved-run fallback:** when today's runs have reached `DAILY_MAX_RUNS`, Reset loads the saved processed state (same as `npm run db:processed`) and sets `demo_run.saved_run = true`. Inbox and Agent run then show "Showing a real earlier run – today's limit for new runs has been reached." (after midnight, while still on the saved run: "Showing a real earlier run – reset the demo to run the agent yourself."). Review, Price lists and Ask work as usual (Ask questions still count). `npm run db:processed` doesn't set `saved_run`.
+- **Testing:** `npm run limits:check` against a server started with `DAILY_MAX_RUNS=2 DAILY_MAX_UPLOADS=2 DAILY_MAX_QUESTIONS=2` (`APP_URL` if not port 3000). It checks reset, the cooldown, the run lock against reset, each limit (atomic counting), the saved-run fallback and that `db:setup` keeps `daily_usage`, with no model calls. It ends on a fresh reset with today's counts cleared.
+
 ## What's already built (Steps 0–3)
 
 - **Accounts:** OpenAI and Anthropic keys with spending limits; GitHub and Vercel connected. OpenAI model: `gpt-6.1-sol` (tool calls need OpenAI's Responses API).
 - **Project:** Next.js 16 with TypeScript, App Router, Tailwind, ESLint, `@/*` alias, no `src/` folder. 10 runtime dependencies, SheetJS installed from its CDN.
-- **Environment variables** (`.env.local`, also needed on Vercel): `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL=claude-sonnet-5-5`, `DATABASE_URL`.
-- **`lib/ai/model.ts`:** returns the OpenAI or Claude model based on `AI_PROVIDER`, with clear errors for missing settings. `app/api/test-ai` is a temporary test route.
+- **Environment variables** (`.env.local`, also needed on Vercel): `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL=claude-sonnet-5-5`, `DATABASE_URL`. Optional (Step 10): `NEXT_PUBLIC_TUTORIAL_URL`, `DAILY_MAX_RUNS` (15), `DAILY_MAX_UPLOADS` (40), `DAILY_MAX_QUESTIONS` (150).
+- **`lib/ai/model.ts`:** returns the OpenAI or Claude model based on `AI_PROVIDER`, with clear errors for missing settings.
 - **Database (Neon):** tables `suppliers` (5), `rules` (5), `source_files` (18: 17 inbox files plus file 16 held back; file 12 has no supplier), `quote_lines` (21 past prices only), `review_items` (0), `agent_events` (0), `price_lists` (2: v1 "First list", v2 "Swift Haul update"). `npm run db:setup` drops and recreates everything in one transaction and can be re-run safely. `lib/db.ts` holds the read functions.
 - **Sample files:** 18 files plus the answer key in `public/samples/`. Key review cases:
   - **Price looks wrong:** file 10, Leeds → Bristol £480 against a usual £160. Suggestion: check with the supplier.

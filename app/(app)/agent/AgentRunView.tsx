@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { CardTitle, PanelDivider, PanelFact, StatusBox, StatusCard } from "@/components/Cards";
 import { Icon } from "@/components/Icon";
 import { HeaderButton, HeaderLink, PageHeader } from "@/components/PageHeader";
@@ -50,7 +50,8 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const isInbox = (f: SnapshotFile) => !f.is_held_back && !f.is_upload;
 
-export function AgentRunView({ initial }: { initial: LiveSnapshot }) {
+/** `note`: shown under the tabs (e.g. "Showing a real earlier run"). */
+export function AgentRunView({ initial, note }: { initial: LiveSnapshot; note?: ReactNode }) {
   const router = useRouter();
   const driver = useRunDriver();
   const [snap, setSnap] = useState<LiveSnapshot>(initial);
@@ -144,6 +145,7 @@ export function AgentRunView({ initial }: { initial: LiveSnapshot }) {
           { key: "log", label: "ACTIVITY LOG", icon: "log" },
         ]}
       />
+      {note}
       {driver.notice && <Notice text={driver.notice} />}
       {driver.paused && driver.active && (
         <p className="m-0 text-sm text-slate">
