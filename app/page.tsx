@@ -6,8 +6,8 @@ import { LandingQuoteTabs } from "./LandingQuoteTabs";
 // Landing page (docs/design/landing.dc.html). The before/after card is the
 // design's own illustration of file 01, not live data.
 
-/** Recording of the demo (Step 12). Until it's set the button shows as "coming soon". */
-const TUTORIAL_URL = process.env.NEXT_PUBLIC_TUTORIAL_URL?.trim() || null;
+/** Recording of the demo (Step 12). NEXT_PUBLIC_TUTORIAL_URL can point it elsewhere. */
+const TUTORIAL_URL = process.env.NEXT_PUBLIC_TUTORIAL_URL?.trim() || "https://youtu.be/9lIC16ieJkg";
 
 export default function LandingPage() {
   return (
@@ -46,27 +46,15 @@ export default function LandingPage() {
                 <Icon name="plus" size={16} strokeWidth={2} />
                 TRY THE AGENT
               </Link>
-              {TUTORIAL_URL ? (
-                <a
-                  href={TUTORIAL_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex min-h-12 items-center gap-2 rounded-btn border border-line-strong bg-white px-[22px] text-sm font-semibold tracking-[0.03em] text-ink no-underline"
-                >
-                  <PlayTriangle />
-                  TUTORIAL VIDEO
-                </a>
-              ) : (
-                // No recording yet: shown, but clearly not clickable.
-                <span
-                  aria-disabled="true"
-                  title="The tutorial video is coming soon"
-                  className="inline-flex min-h-12 cursor-default items-center gap-2 rounded-btn border border-line-strong bg-white px-[22px] text-sm font-semibold tracking-[0.03em] text-muted"
-                >
-                  <PlayTriangle />
-                  TUTORIAL VIDEO
-                </span>
-              )}
+              <a
+                href={TUTORIAL_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-12 items-center gap-2 rounded-btn border border-line-strong bg-white px-[22px] text-sm font-semibold tracking-[0.03em] text-ink no-underline"
+              >
+                <PlayTriangle />
+                TUTORIAL VIDEO
+              </a>
             </div>
             <p className="m-0 text-[13px] text-muted">
               No signup. Sample data is a fictional courier company, Northline Couriers.
