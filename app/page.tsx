@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Icon } from "@/components/Icon";
 import { LandingQuoteTabs } from "./LandingQuoteTabs";
+import { TutorialVideo } from "./TutorialVideo";
 
 // Landing page (docs/design/landing.dc.html). The before/after card is the
 // design's own illustration of file 01, not live data.
@@ -46,15 +47,7 @@ export default function LandingPage() {
                 <Icon name="plus" size={16} strokeWidth={2} />
                 TRY THE AGENT
               </Link>
-              <a
-                href={TUTORIAL_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex min-h-12 items-center gap-2 rounded-btn border border-line-strong bg-white px-[22px] text-sm font-semibold tracking-[0.03em] text-ink no-underline"
-              >
-                <PlayTriangle />
-                TUTORIAL VIDEO
-              </a>
+              <TutorialVideo url={TUTORIAL_URL} />
             </div>
             <p className="m-0 text-[13px] text-muted">
               No signup. Sample data is a fictional courier company, Northline Couriers.
@@ -77,14 +70,6 @@ export default function LandingPage() {
         </div>
       </main>
     </div>
-  );
-}
-
-function PlayTriangle() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M5 3l16 9-16 9z" />
-    </svg>
   );
 }
 
